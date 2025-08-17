@@ -376,7 +376,7 @@ if (!/^\d{10}$/.test(phone)) {
       return digits;
     }
     function buildBookingMessage(b) {
-      return `Om Namo Venkatesaya! Hello ${b.guest_name},Thank you for joining us to celebrate Sreeni&Srinidhi\nYour Room details.\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}`;
+      return `Hello ${b.guest_name},\nYour booking is confirmed.\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}\nBooking ID: ${b.id}`;
     }
     function openWhatsAppOrSMS(phoneRaw, message) {
       const phone = normalizePhoneForIntl(phoneRaw);
@@ -425,7 +425,6 @@ if (!/^\d{10}$/.test(phone)) {
           <td>${bk.block}</td><td>${bk.room_name}</td><td>${bk.guest_name}</td><td>${bk.guest_phone}</td>
           <td>
             <button data-id="${bk.id}" class="msgBtn">Message</button>
-             
             <button data-id="${bk.id}" class="cancelBtn danger">Cancel</button>
           </td>`;
         bookingTbody.appendChild(tr);
@@ -786,28 +785,16 @@ if (!/^\d{10}$/.test(phone)) {
     roomDeleteBtn.addEventListener('click', deleteRoom);
     blockRenameBtn.addEventListener('click', renameBlockAll);
 
-    
-    function csvEscape(value) {
-      if (value == null) return "";
-      let str = String(value);
-      str = str.replace(/"/g, '""');
-      if (/[",\n]/.test(str)) {
-        return `"${str}"`;
-      }
-      return str;
-    }
-
     exportCsvBtn.addEventListener('click', ()=>{
       if(!adminUnlocked){ alert('Unlock admin first'); return; }
-      const head=['#','BookingRef','From','To','Nights','Block','Room','Guest','Phone'];
+      const head=['#','From','To','Nights','Block','Room','Guest','Phone'];
       const lines=[head.join(',')];
-      sortBy(bookings,b=>`${b.from}-${b.block}-${b.roomName}`).forEach((b,i)=>{
-        lines.push([i+1,b.bookingRef||'',b.from,b.to,nights(b.from,b.to),b.block,b.roomName,`"${b.guestName||''}"`,`"${b.guestPhone||''}"`].join(','));
+      sortBy(bookings,b=>`${b.from}-${b.block}-${b.room_name}`).forEach((b,i)=>{
+        lines.push([i+1,b.from,b.to,nights(b.from,b.to),b.block,b.room_name,`"${b.guest_name}"`,`"${b.guest_phone}"`].join(','));
       });
-      const blob = new Blob([lines.join('\n')],{type:'text/csv'});
+      const blob = new Blob([lines.join('\\n')],{type:'text/csv'});
       const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='bookings.csv'; a.click(); URL.revokeObjectURL(url);
     });
-
 
     resetBtn.addEventListener('click', async ()=>{
       if(!adminUnlocked){ alert('Unlock admin first'); return; }
@@ -867,8 +854,8 @@ if (!/^\d{10}$/.test(phone)) {
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab-btn active" data-tab="availTab">Available</button>
-      <button class="tab-btn" data-tab="bookTab">Book</button>
+      <button class="tab-btn" data-tab="availTab">Available</button>
+      <button class="tab-btn active" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="adminTab">Admin</button>
     </div>
 
@@ -927,7 +914,8 @@ if (!/^\d{10}$/.test(phone)) {
         </table>
       </div>
     </section>
-<!-- AVAILABLE TAB -->
+
+    <!-- AVAILABLE TAB -->
     <section id="availTab" class="tab-panel">
       <div class="card">
         <div class="grid">
@@ -948,7 +936,9 @@ if (!/^\d{10}$/.test(phone)) {
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:6px">
           <h2 style="margin:0;font-size:20px">Available Rooms (Next Slot)</h2>
-          <div class="row"><span id="availCount" class="pill">0 found</span></div>
+          <div class="row">
+            <span id="availCount" class="pill">0 found</span>
+          </div>
         </div>
         <table class="list">
           <thead>
@@ -962,7 +952,6 @@ if (!/^\d{10}$/.test(phone)) {
         </table>
       </div>
     </section>
-    
 
     <!-- ADMIN TAB -->
     <section id="adminTab" class="tab-panel">
