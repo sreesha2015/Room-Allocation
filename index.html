@@ -42,8 +42,8 @@
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
     // ======= CONFIG: fill these with your project details =======
-    const SUPABASE_URL = window.SUPABASE_URL || 'https://favzbegaspteakboncko.supabase.co';
-    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdnpiZWdhc3B0ZWFrYm9uY2tvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxODAxNTEsImV4cCI6MjA3MDc1NjE1MX0.YaFXG5QNyXfzzY1VPlZZ0-2Oas9MbA5uvmUprjBvpVY';
+    const SUPABASE_URL = window.SUPABASE_URL || 'https://hrqmgieuindcwipgcvdj.supabase.co';
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhycW1naWV1aW5kY3dpcGdjdmRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxOTM1NDEsImV4cCI6MjA3MDc2OTU0MX0.idkUvys-Fc25uA9Nre2E0V5X5qHxPcnlVyLL4OE0E9Q';
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // ======= Storage Keys (kept only for compatibility of variable names) =======
@@ -330,7 +330,10 @@
       if(!validDate(f) || !validDate(t) || !(parseISO(f) < parseISO(t))) reasons.push('Pick a valid From and To');
       if(!roomId) reasons.push('Choose a room');
       if(name.length < 2) reasons.push('Enter guest name');
-      if(!/^[0-9+\\-\\s()]{7,}$/.test(phone)) reasons.push('Enter a valid phone');
+      // if(!/^[0-9+\\-\\s()]{10,}$/.test(phone)) reasons.push('Enter a valid phone');
+if (!/^\d{10}$/.test(phone)) {
+    reasons.push('Enter a valid phone');
+}
 
       if(roomId && validDate(f) && validDate(t) && (parseISO(f) < parseISO(t))){
         const room = rooms.find(r=>r.id===roomId);
@@ -344,7 +347,7 @@
       const f=fromDate.value, t=toDate.value, roomId=roomSelect.value;
       const name=guestName.value.trim(), phone=guestPhone.value.trim();
 
-      let ok = validDate(f)&&validDate(t)&&(parseISO(f)<parseISO(t)) && !!roomId && name.length>=2 && /^[0-9+\\-\\s()]{7,}$/.test(phone);
+      let ok = validDate(f)&&validDate(t)&&(parseISO(f)<parseISO(t)) && !!roomId && name.length>=2 && /^\d{10}$/.test(phone);
       if(ok){
         const room = rooms.find(r=>r.id===roomId);
         const eff = effectiveRanges(room);
@@ -364,6 +367,34 @@
       }
       return null;
     }
+
+    // ======= Messaging Helpers (NEW) =======
+    function normalizePhoneForIntl(raw) {
+      const digits = (raw || "").replace(/\D/g, "");
+      if (digits.startsWith("91") && digits.length >= 12) return digits;
+      if (digits.length === 10) return "91" + digits; // default India
+      return digits;
+    }
+    function buildBookingMessage(b) {
+      return `Om Namo Venkatesaya! Hello ${b.guest_name},Thank you for joining us to celebrate Sreeni&Srinidhi\nYour Room details.\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}`;
+    }
+    function openWhatsAppOrSMS(phoneRaw, message) {
+      const phone = normalizePhoneForIntl(phoneRaw);
+      const encodedText = encodeURIComponent(message);
+      const waUrl = `https://wa.me/${phone}?text=${encodedText}`;
+      const win = window.open(waUrl, "_blank");
+      if (win) return true;
+      const smsBodySep = navigator.userAgent.match(/iPhone|iPad|iPod/i) ? "&" : "?";
+      const smsUrl = `sms:+${phone}${smsBodySep}body=${encodedText}`;
+      const win2 = window.open(smsUrl, "_blank");
+      return !!win2;
+    }
+    function sendMessageForBooking(booking) {
+      const msg = buildBookingMessage(booking);
+      const ok = openWhatsAppOrSMS(booking.guest_phone, msg);
+      if (!ok) alert("Could not open WhatsApp/SMS. Please check popup settings.");
+    }
+
     async function book(){
       if(bookBtn.disabled) return;
       const room = rooms.find(r=>r.id===roomSelect.value);
@@ -379,6 +410,8 @@
       guestName.value=''; guestPhone.value='';
       renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
       alert(`Booked ${room.block} — ${room.name} for ${entry.from} → ${entry.to} (${nights(entry.from,entry.to)} nights).`);
+      // Auto-open WhatsApp/SMS (NEW)
+      sendMessageForBooking(entry);
     }
     function renderBookings(){
       bookingTbody.innerHTML='';
@@ -390,7 +423,11 @@
         tr.innerHTML = `
           <td>${i+1}</td><td>${bk.from}</td><td>${bk.to}</td><td>${nights(bk.from,bk.to)}</td>
           <td>${bk.block}</td><td>${bk.room_name}</td><td>${bk.guest_name}</td><td>${bk.guest_phone}</td>
-          <td><button data-id="${bk.id}" class="cancelBtn">Cancel</button></td>`;
+          <td>
+            <button data-id="${bk.id}" class="msgBtn">Message</button>
+             
+            <button data-id="${bk.id}" class="cancelBtn danger">Cancel</button>
+          </td>`;
         bookingTbody.appendChild(tr);
       });
       bookingTbody.querySelectorAll('.cancelBtn').forEach(btn=>{
@@ -399,6 +436,14 @@
           bookings=bookings.filter(b=>b.id!==id);
           await deleteBookingById(id);
           renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
+        });
+      });
+      // Message button handler (NEW)
+      bookingTbody.querySelectorAll('.msgBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x => x.id === id);
+          if (b) sendMessageForBooking(b);
         });
       });
     }
@@ -741,16 +786,28 @@
     roomDeleteBtn.addEventListener('click', deleteRoom);
     blockRenameBtn.addEventListener('click', renameBlockAll);
 
+    
+    function csvEscape(value) {
+      if (value == null) return "";
+      let str = String(value);
+      str = str.replace(/"/g, '""');
+      if (/[",\n]/.test(str)) {
+        return `"${str}"`;
+      }
+      return str;
+    }
+
     exportCsvBtn.addEventListener('click', ()=>{
       if(!adminUnlocked){ alert('Unlock admin first'); return; }
-      const head=['#','From','To','Nights','Block','Room','Guest','Phone'];
+      const head=['#','BookingRef','From','To','Nights','Block','Room','Guest','Phone'];
       const lines=[head.join(',')];
-      sortBy(bookings,b=>`${b.from}-${b.block}-${b.room_name}`).forEach((b,i)=>{
-        lines.push([i+1,b.from,b.to,nights(b.from,b.to),b.block,b.room_name,`"${b.guest_name}"`,`"${b.guest_phone}"`].join(','));
+      sortBy(bookings,b=>`${b.from}-${b.block}-${b.roomName}`).forEach((b,i)=>{
+        lines.push([i+1,b.bookingRef||'',b.from,b.to,nights(b.from,b.to),b.block,b.roomName,`"${b.guestName||''}"`,`"${b.guestPhone||''}"`].join(','));
       });
-      const blob = new Blob([lines.join('\\n')],{type:'text/csv'});
+      const blob = new Blob([lines.join('\n')],{type:'text/csv'});
       const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='bookings.csv'; a.click(); URL.revokeObjectURL(url);
     });
+
 
     resetBtn.addEventListener('click', async ()=>{
       if(!adminUnlocked){ alert('Unlock admin first'); return; }
@@ -810,8 +867,8 @@
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab-btn active" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="availTab">Available</button>
+      <button class="tab-btn active" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="adminTab">Admin</button>
     </div>
 
@@ -852,9 +909,9 @@
             <div id="whyDisabled" class="hint warn"></div>
             <button id="bookBtn" disabled>Book</button>
           </div>
-        </div>
-        //<div class="hint">If a room had availability <b>10→12</b> and someone books <b>10→11</b>, the leftover <b>11→12</b> becomes available instantly.</div>
-      </div>
+        <!-- </div>
+        <div class="hint">If a room had availability <b>10→12</b> and someone books <b>10→11</b>, the leftover <b>11→12</b> becomes available instantly.</div>
+      </div> -->
 
       <div class="card">
         <h2 style="margin:0 0 8px;font-size:20px">Bookings</h2>
