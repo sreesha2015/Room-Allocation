@@ -867,8 +867,8 @@ if (!/^\d{10}$/.test(phone)) {
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab-btn" data-tab="availTab">Available</button>
-      <button class="tab-btn active" data-tab="bookTab">Book</button>
+      <button class="tab-btn active" data-tab="availTab">Available</button>
+      <button class="tab-btn" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="adminTab">Admin</button>
     </div>
 
@@ -927,8 +927,7 @@ if (!/^\d{10}$/.test(phone)) {
         </table>
       </div>
     </section>
-
-    <!-- AVAILABLE TAB -->
+<!-- AVAILABLE TAB -->
     <section id="availTab" class="tab-panel">
       <div class="card">
         <div class="grid">
@@ -949,9 +948,7 @@ if (!/^\d{10}$/.test(phone)) {
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:6px">
           <h2 style="margin:0;font-size:20px">Available Rooms (Next Slot)</h2>
-          <div class="row">
-            <span id="availCount" class="pill">0 found</span>
-          </div>
+          <div class="row"><span id="availCount" class="pill">0 found</span></div>
         </div>
         <table class="list">
           <thead>
@@ -965,6 +962,7 @@ if (!/^\d{10}$/.test(phone)) {
         </table>
       </div>
     </section>
+    
 
     <!-- ADMIN TAB -->
     <section id="adminTab" class="tab-panel">
