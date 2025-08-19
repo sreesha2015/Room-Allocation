@@ -873,7 +873,7 @@
       sortBy(bookings,b=>`${b.from}-${b.block}-${b.room_name}`).forEach((b,i)=>{
         lines.push([i+1,b.from,b.to,nights(b.from,b.to),b.block,b.room_name,`"${b.guest_name}"`,`"${b.guest_phone}"`].join(','));
       });
-      const blob = new Blob([lines.join('\\n')],{type:'text/csv'});
+      const blob = new Blob([lines.join('\n')],{type:'text/csv'});
       const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='bookings.csv'; a.click(); URL.revokeObjectURL(url);
     });
 
