@@ -165,7 +165,7 @@
       return s;
     }
     function buildVacateReminderMessage(b){
-      return `Hello ${b.guest_name},\nThis is a gentle reminder that your stay in ${b.block} / ${b.room_name} ends on ${b.to}.\nPlease vacate the room on or before ${b.to}. Thank you.`;
+      return `Hello ${b.guest_name},\nOm Namo Narayana!\n Thank you for being a part of Sreeni&Srinidhi's Big day.\nThis is a gentle reminder that your stay in ${b.block} / ${b.room_name} ends on ${b.to}.\nPlease vacate the room on or before ${b.to}. Thank you.`;
     }
     function sendReminderForBooking(booking){
       const msg = buildVacateReminderMessage(booking);
@@ -421,7 +421,7 @@
       return null;
     }
     function buildBookingMessage(b) {
-      return `Hello ${b.guest_name},\nYour booking is confirmed.\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}\nBooking ID: ${b.id}`;
+      return `Hello ${b.guest_name},\n Om Namo Narayana! \n Thank you for joining us to celebrate Sreenivasan & Srinidhi.\n Your accomodation details\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}`;
     }
     function openWhatsAppOrSMS(phoneRaw, message) {
       const phone = normalizePhoneForIntl(phoneRaw);
