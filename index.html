@@ -1,18 +1,11 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+
   <meta charset="utf-8" />
-  <title>Room Booking — rb7 + Supabase + WhatsApp (DEBUG)</title>
+  <title>Room Booking </title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Inline SVG favicon to silence 404 -->
-  <link rel="icon" type="image/svg+xml"
-        href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" ry="12" fill="%230f1730"/><text x="32" y="40" font-size="28" text-anchor="middle" fill="%234da3ff" font-family="Arial, Helvetica, sans-serif">RB</text></svg>'>
-
-  <!-- SheetJS for Excel support -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
-  <!-- Supabase JS -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-
   <style>
     :root { --bg:#0b1220; --card:#121a2b; --muted:#8aa0c6; --text:#e9eefc; --accent:#4da3ff; --accent-2:#6dd3ff; }
     *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#0b1220,#0b1220 200px,#0e1630); color:var(--text)}
@@ -34,42 +27,916 @@
     .list th,.list td{padding:10px;border-bottom:1px solid #223054;text-align:left}
     .hint{font-size:12px;color:#9ab3e0;margin-top:6px}
     .warn{color:#ffd27d}
+    /* Tabs */
     .tabs{display:flex;gap:8px;margin:8px 0 16px}
     .tab-btn{padding:10px 14px;border-radius:12px;border:1px solid #2d3a5f;background:#0f1730;color:#a9c1ef;cursor:pointer}
     .tab-btn.active{background:var(--accent);color:#071121;border-color:transparent}
     .tab-panel{display:none}
     .tab-panel.active{display:block}
+    /* Admin lock overlay */
     .admin-locked{position:relative;filter:saturate(.6) opacity(.9)}
-    .admin-locked::after{content:"Admin Locked — unlock to edit"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(9,12,24,.65); border-radius:16px; font-weight:700; letter-spacing:.2px}
-    .status {font-size:12px;border:1px solid #233255;background:#0f1730;border-radius:12px;padding:10px;white-space:pre-wrap;line-height:1.4}
-    .badge-ok{background:linear-gradient(90deg,#27ecb8,#6dd3ff); color:#04121a}
-    .badge-err{background:#ff9aa9;color:#22080b;border-color:#8a2733}
-    .footer{opacity:.7; font-size:12px; margin-top:8px}
-    hr.sep{border:none;border-top:1px solid #223054;margin:10px 0 14px}
-    /* Debug panel */
-    #debugPanel{position:fixed;inset:auto 8px 8px 8px;background:#0e1730;border:1px solid #2a3a60;border-radius:10px;padding:10px;color:#cfe1ff;font:12px ui-monospace,Consolas;z-index:99999;max-height:40vh;overflow:auto;display:none}
-    #debugPanel pre{white-space:pre-wrap;margin:0}
+    .admin-locked::after{
+      content:"Admin Locked — unlock to edit"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      background:rgba(9,12,24,.65); border-radius:16px; font-weight:700; letter-spacing:.2px
+    }
+    /* ---------- Mobile tweaks ---------- */
+@media (max-width: 768px) {
+  .wrap { margin: 0; padding: 12px; }
+  .card { padding: 12px; border-radius: 14px; }
+
+  /* Make all grid items full-width on mobile */
+  .grid { grid-template-columns: 1fr; gap: 10px; }
+  /* Force inline style spans (e.g., "grid-column: span 3") to stack */
+  .grid > * { grid-column: 1 / -1 !important; }
+
+  /* Tabs: allow horizontal scroll and bigger tap targets */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab-btn { flex: 0 0 auto; padding: 12px 16px; min-height: 44px; }
+
+  /* Tables: enable sideways scroll instead of squishing */
+  table.list { display: block; width: 100%; overflow-x: auto; white-space: nowrap; }
+  .list th, .list td { padding: 10px 8px; font-size: 14px; }
+
+  /* Inputs: prevent iOS zoom by keeping font-size >= 16px, enlarge tap area */
+  input, select, button, textarea { font-size: 16px; min-height: 44px; }
+
+  /* Long selects (like the Admin rooms list) shouldn’t fill the whole screen */
+  #roomsList { max-height: 260px; overflow: auto; }
+}
+
+/* Small phones */
+@media (max-width: 360px) {
+  .tab-btn { padding: 10px 12px; }
+  .list th, .list td { font-size: 13px; }
+}
+
   </style>
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+    // ======= CONFIG: fill these with your project details =======
+    const SUPABASE_URL = window.SUPABASE_URL || 'https://dtrvmdyxyirhalcmidiz.supabase.co';
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0cnZtZHl4eWlyaGFsY21pZGl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU1MjMwODEsImV4cCI6MjA3MTA5OTA4MX0.hdyBmmJfdYPfTrUf3Kn2cG9u58ZUZgLZfXjRooV9ntI';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ======= Storage Keys (kept only for compatibility of variable names) =======
+    const LS_KEYS = {
+      ROOMS: 'rb7_rooms_v1',
+      BOOKINGS: 'rb7_bookings_v1',
+      BLACKOUTS: 'rb7_blackouts_v1',
+      ADMIN_PIN: 'rb7_admin_pin'
+    };
+
+    // ======= Helpers =======
+    const $ = id => document.getElementById(id);
+    const parseISO = s => new Date(s+'T00:00:00');
+    const fmtISO = d => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    const nights = (f,t) => Math.max(0, Math.round((parseISO(t) - parseISO(f))/86400000));
+    const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    const sortBy = (arr, f) => arr.slice().sort((a,b)=> (f(a)>f(b)) - (f(a)<f(b)));
+    const uc = s => (s||'').trim().toUpperCase();
+    const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+
+    function mergeRanges(ranges){
+      if(!ranges?.length) return [];
+      const s = ranges
+        .filter(r=> validDate(r.from)&&validDate(r.to)&&parseISO(r.from)<parseISO(r.to))
+        .sort((a,b)=> a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+      const out=[{...s[0]}];
+      for(let i=1;i<s.length;i++){
+        const prev=out[out.length-1], cur=s[i];
+        if(parseISO(prev.to) >= parseISO(cur.from)){
+          if(parseISO(cur.to) > parseISO(prev.to)) prev.to = cur.to;
+        } else { out.push({...cur}); }
+      }
+      return out;
+    }
+    function unionContainsRange(mergedRanges, from, to){
+      if(!mergedRanges.length) return false;
+      let cursor = parseISO(from);
+      const target = parseISO(to);
+      for(const r of mergedRanges){
+        const rf=parseISO(r.from), rt=parseISO(r.to);
+        if(rf > cursor) return false;
+        if(rt > cursor) cursor = rt;
+        if(cursor >= target) return true;
+      }
+      return cursor >= target;
+    }
+    function subtractRange(ranges, cutFrom, cutTo){
+      const CF = parseISO(cutFrom), CT = parseISO(cutTo);
+      const out = [];
+      for(const r of mergeRanges(ranges)){
+        const RF = parseISO(r.from), RT = parseISO(r.to);
+        if(!(RF < CT && CF < RT)){ out.push(r); continue; }
+        if(RF < CF) out.push({from: fmtISO(RF), to: fmtISO(CF)});
+        if(CT < RT) out.push({from: fmtISO(CT), to: fmtISO(RT)});
+      }
+      return mergeRanges(out);
+    }
+    function effectiveRanges(room){
+      let eff = mergeRanges(room.ranges || []);
+      const blk = mergeRanges(blackouts[room.block] || []);
+      for(const b of blk){ eff = subtractRange(eff, b.from, b.to); if(!eff.length) break; }
+      const rb = bookings.filter(b=> b.room_id === room.id);
+      for(const bk of rb){ eff = subtractRange(eff, bk.from, bk.to); if(!eff.length) break; }
+      return eff;
+    }
+    function parseRangeLine(line){
+      const parts = [...line.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map(m=>m[1]);
+      if(parts.length >= 2){
+        const from = parts[0], to = parts[1];
+        if(validDate(from) && validDate(to) && parseISO(from) < parseISO(to)) return {from, to};
+      }
+      return null;
+    }
+
+    // ======= Phone / WhatsApp helpers =======
+    const DEFAULT_COUNTRY_CODE = '91'; // India default for 10-digit numbers
+    function normalizePhoneForIntl(raw){
+      if(raw == null) return '';
+      let s = String(raw).trim();
+      if(s.startsWith('+')){
+        return s.replace(/\D+/g,'').replace(/^0+/,'');
+      }
+      s = s.replace(/\D+/g,'');
+      if(s.length === 11 && s.startsWith('0')) s = s.slice(1);
+      if(s.length === 10) s = DEFAULT_COUNTRY_CODE + s;
+      return s;
+    }
+    function buildVacateReminderMessage(b){
+      return `Hello ${b.guest_name},\nThis is a gentle reminder that your stay in ${b.block} / ${b.room_name} ends on ${b.to}.\nPlease vacate the room on or before ${b.to}. Thank you.`;
+    }
+    function sendReminderForBooking(booking){
+      const msg = buildVacateReminderMessage(booking);
+      const ok = openWhatsAppOrSMS(booking.guest_phone, msg);
+      if (!ok) alert("Could not open WhatsApp/SMS. Please check popup settings.");
+    }
+
+
+    // ======= In-memory state (authoritative copy mirrored to Supabase) =======
+    let rooms = [];        // [{id, block, name, ranges: [{from,to},...] }]
+    let bookings = [];     // [{id, from, to, room_id, block, room_name, guest_name, guest_phone, created_at}]
+    let blackouts = {};    // { [block]: [{from,to}] }
+    let adminUnlocked = false;
+
+    // ======= Supabase persistence layer =======
+    async function fetchAll(){
+      // rooms
+      const { data: rdata, error: rerr } = await supabase
+        .from('rooms')
+        .select('id, block, name, ranges')
+        .order('block', { ascending: true })
+        .order('name', { ascending: true });
+      if(rerr) { console.error(rerr); throw new Error('Failed to load rooms'); }
+      rooms = (rdata||[]).map(r=>({ ...r, ranges: r.ranges || [] }));
+
+      // bookings
+      const { data: bdata, error: berr } = await supabase
+        .from('bookings')
+        .select('id, from, to, room_id, block, room_name, guest_name, guest_phone, created_at');
+      if(berr) { console.error(berr); throw new Error('Failed to load bookings'); }
+      bookings = (bdata||[]);
+
+      // blackouts (per block row with JSON ranges)
+      const { data: kdata, error: kerr } = await supabase
+        .from('blackouts')
+        .select('block, ranges');
+      if(kerr) { console.error(kerr); throw new Error('Failed to load blackouts'); }
+      blackouts = {};
+      (kdata||[]).forEach(row=>{ blackouts[row.block] = row.ranges || []; });
+
+      // admin pin
+      const { data: sdata } = await supabase.from('settings').select('key, value').eq('key','admin_pin').maybeSingle();
+      if(!sdata){
+        await supabase.from('settings').upsert({ key:'admin_pin', value:'1234' });
+      }
+    }
+
+    async function seedRoomsIfEmpty(){
+      if(rooms.length) return;
+      const blocks = ['A','B','C','D','E','F'];
+      const arr=[];
+      blocks.forEach(b=>{ for(let i=1;i<=25;i++){ arr.push({id:crypto.randomUUID(),block:b,name:`${b}-${String(i).padStart(3,'0')}`,ranges:[]}); }});
+      // upsert
+      const { error } = await supabase.from('rooms').upsert(arr, { onConflict: 'id' });
+      if(error) { console.error(error); alert('Failed to seed rooms'); }
+      rooms = arr;
+    }
+
+    async function commitRooms(allRooms){
+      // Upsert all rooms for simplicity (small data set)
+      const payload = allRooms.map(r=>({ id:r.id, block:r.block, name:r.name, ranges:r.ranges||[] }));
+      const { error } = await supabase.from('rooms').upsert(payload, { onConflict: 'id' });
+      if(error) console.error('commitRooms error', error);
+    }
+    async function commitBookings(allBookings){
+      const payload = allBookings.map(b=>({ id:b.id, from:b.from, to:b.to, room_id:b.room_id, block:b.block, room_name:b.room_name, guest_name:b.guest_name, guest_phone:b.guest_phone, created_at:b.created_at }));
+      // Upsert all
+      const { error } = await supabase.from('bookings').upsert(payload, { onConflict: 'id' });
+      if(error) console.error('commitBookings error', error);
+    }
+    async function commitBlackouts(obj){
+      // Upsert per-block rows
+      const rows = Object.keys(obj).map(block=> ({ block, ranges: mergeRanges(obj[block]||[]) }));
+      const { error } = await supabase.from('blackouts').upsert(rows, { onConflict: 'block' });
+      if(error) console.error('commitBlackouts error', error);
+    }
+    async function deleteRoomById(id){
+      const { error } = await supabase.from('rooms').delete().eq('id', id);
+      if(error) console.error('deleteRoomById error', error);
+    }
+    async function deleteBookingsByRoomId(id){
+      const { error } = await supabase.from('bookings').delete().eq('room_id', id);
+      if(error) console.error('deleteBookingsByRoomId error', error);
+    }
+    async function deleteBookingById(id){
+      const { error } = await supabase.from('bookings').delete().eq('id', id);
+      if(error) console.error('deleteBookingById error', error);
+    }
+    async function getPin(){
+      const { data } = await supabase.from('settings').select('value').eq('key','admin_pin').maybeSingle();
+      return data?.value || '1234';
+    }
+    async function setPin(pin){
+      await supabase.from('settings').upsert({ key:'admin_pin', value:String(pin) });
+    }
+
+    // ======= UI Refs (BOOK) =======
+    const blockFilter=$('blockFilter'), fromDate=$('fromDate'), toDate=$('toDate'), suggestBtn=$('suggestBtn'),
+          roomSelect=$('roomSelect'), roomAvailHint=$('roomAvailHint'),
+          guestName=$('guestName'), guestPhone=$('guestPhone'), bookBtn=$('bookBtn'), whyDisabled=$('whyDisabled'),
+          bookingTbody=$('bookingTbody');
+
+    // ======= UI Refs (AVAILABLE) =======
+    const availBlock=$('availBlock'), availRefreshBtn=$('availRefreshBtn'), showNoAvail=$('showNoAvail'),
+          availTbody=$('availTbody'), availCount=$('availCount');
+
+    // ======= UI Refs (ADMIN) =======
+    const adminStatus=$('adminStatus'), adminUnlockBtn=$('adminUnlockBtn'), adminLockBtn=$('adminLockBtn'),
+          adminPinInput=$('adminPinInput'), adminPinSetBtn=$('adminPinSetBtn'),
+          adminContent=$('adminContent'),
+          roomsList=$('roomsList'), rangesText=$('rangesText'), saveRangesBtn=$('saveRangesBtn'),
+          sampleRangesBtn=$('sampleRangesBtn'), addBlockRoomsBtn=$('addBlockRoomsBtn'),
+          csvFile=$('csvFile'), csvImportBtn=$('csvImportBtn'), csvReplace=$('csvReplace'),
+          blackoutBlock=$('blackoutBlock'), blackoutText=$('blackoutText'),
+          saveBlackoutBtn=$('saveBlackoutBtn'), sampleBlackoutBtn=$('sampleBlackoutBtn'),
+          exportCsvBtn=$('exportCsvBtn'), resetBtn=$('resetBtn'),
+          roomBlockInput=$('roomBlockInput'), roomNameInput=$('roomNameInput'),
+          roomMetaSaveBtn=$('roomMetaSaveBtn'), roomDeleteBtn=$('roomDeleteBtn'),
+          blockRenameOld=$('blockRenameOld'), blockRenameNew=$('blockRenameNew'), blockRenameBtn=$('blockRenameBtn');
+
+    // ======= Tabs =======
+    document.querySelectorAll('.tab-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // ======= Rendering (shared) =======
+    function blocksList(){
+      return [...new Set(rooms.map(r=>r.block))].sort();
+    }
+    function renderBlocksInto(selectEl){
+      const blocks = blocksList();
+      selectEl.innerHTML = '<option value="">All Blocks</option>'+blocks.map(b=>`<option value="${b}">${b}</option>`).join('');
+    }
+    function renderBlockFilter(){
+      renderBlocksInto(blockFilter);
+      renderBlocksInto(availBlock);
+      const blocks = blocksList();
+      blackoutBlock.innerHTML = blocks.map(b=>`<option value="${b}">${b}</option>`).join('');
+      blockRenameOld.innerHTML = blocks.map(b=>`<option value="${b}">${b}</option>`).join('');
+      if(!blackoutBlock.value && blocks.length) blackoutBlock.value = blocks[0];
+      if(!blockRenameOld.value && blocks.length) blockRenameOld.value = blocks[0];
+      renderBlackoutEditor();
+    }
+    function renderRoomsList(){
+      const sel = roomsList.value;
+      roomsList.innerHTML = '';
+      sortBy(rooms, r=>`${r.block}-${r.name}`).forEach(r=>{
+        const o=document.createElement('option');
+        o.value=r.id; o.textContent=`${r.block} / ${r.name} — (${(r.ranges||[]).length})`;
+        roomsList.appendChild(o);
+      });
+      if(sel && [...roomsList.options].some(o=>o.value===sel)) roomsList.value=sel;
+      renderRangesEditor();
+      renderRoomMetaEditor();
+    }
+    function renderRangesEditor(){
+      const id=roomsList.value; const room=rooms.find(r=>r.id===id);
+      if(!room){ rangesText.value=''; return; }
+      const merged = mergeRanges(room.ranges||[]);
+      rangesText.value = merged.map(r=>`${r.from} to ${r.to}`).join('\n');
+    }
+    function renderRoomMetaEditor(){
+      const id=roomsList.value; const room=rooms.find(r=>r.id===id);
+      if(!room){ roomBlockInput.value=''; roomNameInput.value=''; return; }
+      roomBlockInput.value = room.block;
+      roomNameInput.value  = room.name;
+    }
+    function renderBlackoutEditor(){
+      const blk = blackoutBlock.value;
+      const merged = mergeRanges((blackouts[blk] || []));
+      blackoutText.value = merged.map(r=>`${r.from} to ${r.to}`).join('\n');
+    }
+
+    // ======= Booking flow =======
+    function availableRoomsFor(from,to,blockSel){
+      return rooms.filter(r=>{
+        if(blockSel && r.block!==blockSel) return false;
+        const eff = effectiveRanges(r);
+        if(!unionContainsRange(eff, from, to)) return false;
+        return true;
+      }).sort((a,b)=> a.block.localeCompare(b.block) || a.name.localeCompare(b.name));
+    }
+    function renderRoomSelect(){
+      roomAvailHint.textContent = '';
+      const f=fromDate.value, t=toDate.value;
+      roomSelect.innerHTML='';
+      if(!(validDate(f)&&validDate(t)) || !(parseISO(f) < parseISO(t))){
+        roomSelect.innerHTML='<option value="">Select valid dates first</option>'; roomSelect.disabled=true; return;
+      }
+      const avail = availableRoomsFor(f,t, blockFilter.value);
+      if(avail.length===0){
+        roomSelect.innerHTML = `<option value="">No rooms available on ${f} → ${t}</option>`; roomSelect.disabled=true;
+      } else {
+        roomSelect.innerHTML = ['<option value="">Select a room</option>']
+          .concat(avail.map(r=>`<option value="${r.id}">${r.block} — ${r.name}</option>`)).join('');
+        roomSelect.disabled=false;
+      }
+    }
+    function showRoomHint(room){
+      if(!room){ roomAvailHint.textContent=''; return; }
+      const eff = effectiveRanges(room);
+      const sample = eff.slice(0,5).map(r=>`${r.from} → ${r.to}`).join(' | ');
+      const more = eff.length>5 ? ` (+${eff.length-5} more)` : '';
+      roomAvailHint.textContent = eff.length ? `Available now: ${sample}${more}` : 'No available ranges remaining.';
+    }
+    function explainDisabled(){
+      const reasons = [];
+      const f = fromDate.value, t = toDate.value;
+      const roomId = roomSelect.value;
+      const name = guestName.value.trim();
+      const phone = guestPhone.value.trim();
+
+      if(!validDate(f) || !validDate(t) || !(parseISO(f) < parseISO(t))) reasons.push('Pick a valid From and To');
+      if(!roomId) reasons.push('Choose a room');
+      if(name.length < 2) reasons.push('Enter guest name');
+      if(!/^[0-9+\\-\\s()]{7,}$/.test(phone)) reasons.push('Enter a valid phone');
+
+      if(roomId && validDate(f) && validDate(t) && (parseISO(f) < parseISO(t))){
+        const room = rooms.find(r=>r.id===roomId);
+        const eff = effectiveRanges(room);
+        if(!unionContainsRange(eff, f, t)) reasons.push('Room not available for the entire range');
+      }
+
+      whyDisabled.textContent = reasons.length ? ('Can’t book: ' + reasons.join(' • ')) : '';
+    }
+    function validate(){
+      const f=fromDate.value, t=toDate.value, roomId=roomSelect.value;
+      const name=guestName.value.trim(), phone=guestPhone.value.trim();
+
+      let ok = validDate(f)&&validDate(t)&&(parseISO(f)<parseISO(t)) && !!roomId && name.length>=2 && /^[0-9+\\-\\s()]{7,}$/.test(phone);
+      if(ok){
+        const room = rooms.find(r=>r.id===roomId);
+        const eff = effectiveRanges(room);
+        ok = unionContainsRange(eff, f, t);
+      }
+      bookBtn.disabled = !ok;
+      explainDisabled();
+    }
+    function nextAvailableRangeForRoom(room, minFrom, nightsNeeded){
+      const m = parseISO(minFrom), neededMs = nightsNeeded*86400000;
+      const eff = effectiveRanges(room);
+      for(const r of eff){
+        let start = parseISO(r.from);
+        if(start < m) start = m;
+        const endCandidate = new Date(start.getTime() + neededMs);
+        if(endCandidate <= parseISO(r.to)){ return {from: fmtISO(start), to: fmtISO(endCandidate)}; }
+      }
+      return null;
+    }
+    function buildBookingMessage(b) {
+      return `Hello ${b.guest_name},\nYour booking is confirmed.\nBlock: ${b.block}\nRoom: ${b.room_name}\nDates: ${b.from} → ${b.to}\nBooking ID: ${b.id}`;
+    }
+    function openWhatsAppOrSMS(phoneRaw, message) {
+      const phone = normalizePhoneForIntl(phoneRaw);
+      const encodedText = encodeURIComponent(message);
+      const waUrl = `https://wa.me/${phone}?text=${encodedText}`;
+      const win = window.open(waUrl, "_blank");
+      if (win) return true;
+      const smsBodySep = navigator.userAgent.match(/iPhone|iPad|iPod/i) ? "&" : "?";
+      const smsUrl = `sms:+${phone}${smsBodySep}body=${encodedText}`;
+      const win2 = window.open(smsUrl, "_blank");
+      return !!win2;
+    }
+    function sendMessageForBooking(booking) {
+      const msg = buildBookingMessage(booking);
+      const ok = openWhatsAppOrSMS(booking.guest_phone, msg);
+      if (!ok) alert("Could not open WhatsApp/SMS. Please check popup settings.");
+    }
+    async function book(){
+      if(bookBtn.disabled) return;
+      const room = rooms.find(r=>r.id===roomSelect.value);
+      const entry = {
+        id:'bk_'+crypto.randomUUID(), from: fromDate.value, to: toDate.value,
+        room_id: room.id, block: room.block, room_name: room.name,
+        guest_name: guestName.value.trim(), guest_phone: guestPhone.value.trim(),
+        created_at: new Date().toISOString()
+      };
+      bookings.push(entry);
+      // persist
+      await commitBookings(bookings);
+      guestName.value=''; guestPhone.value='';
+      renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
+      alert(`Booked ${room.block} — ${room.name} for ${entry.from} → ${entry.to} (${nights(entry.from,entry.to)} nights).`);
+         // Auto-open WhatsApp/SMS (NEW)
+      sendMessageForBooking(entry);
+    }
+    function renderBookings(){
+      bookingTbody.innerHTML='';
+      if(!bookings.length){
+        bookingTbody.innerHTML = `<tr><td colspan="9" class="muted">No bookings yet.</td></tr>`; return;
+      }
+      sortBy(bookings, b=>`${b.from}-${b.block}-${b.room_name}`).forEach((bk,i)=>{
+        const tr=document.createElement('tr');
+        
+        tr.innerHTML = `
+          <td>${i+1}</td><td>${bk.from}</td><td>${bk.to}</td><td>${nights(bk.from,bk.to)}</td>
+          <td>${bk.block}</td><td>${bk.room_name}</td><td>${bk.guest_name}</td><td>${bk.guest_phone}</td>
+          <td>
+            <div class="row">
+              <button data-id="${bk.id}" class="msgBtn">Message</button>
+              <button data-id="${bk.id}" class="remindBtn ghost">Remind</button>
+              <button data-id="${bk.id}" class="cancelBtn danger">Cancel</button>
+            </div>
+          </td>`
+;
+        bookingTbody.appendChild(tr);
+      });
+      bookingTbody.querySelectorAll('.cancelBtn').forEach(btn=>{
+        btn.addEventListener('click', async e=>{
+          const id=e.target.getAttribute('data-id');
+          bookings=bookings.filter(b=>b.id!==id);
+          await deleteBookingById(id);
+          renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
+        });
+      });
+      // Remind buttons
+      bookingTbody.querySelectorAll('.remindBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x=>x.id===id);
+          if(b) sendReminderForBooking(b);
+        });
+      });
+          // Message button handler (NEW)
+      bookingTbody.querySelectorAll('.msgBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x => x.id === id);
+          if (b) sendMessageForBooking(b);
+        });
+      });
+      // Remind buttons
+      bookingTbody.querySelectorAll('.remindBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x=>x.id===id);
+          if(b) sendReminderForBooking(b);
+        });
+      });
+    }
+
+    // ======= Available view =======
+    function nextSlotFromToday(room){
+      const today = parseISO(fmtISO(new Date())); // strip time
+      const eff = effectiveRanges(room).filter(r => parseISO(r.to) > today);
+      if(!eff.length) return null;
+      const first = eff[0];
+      const start = parseISO(first.from) < today ? today : parseISO(first.from);
+      return {from: fmtISO(start), to: first.to};
+    }
+    function renderAvailableList(){
+      const blk = availBlock.value;
+      const includeNoAvail = showNoAvail.checked;
+      const rows = [];
+
+      rooms.forEach(r => {
+        if(blk && r.block !== blk) return;
+        const slot = nextSlotFromToday(r);
+        if(slot){ rows.push({room:r, slot}); }
+        else if(includeNoAvail){ rows.push({room:r, slot:null}); }
+      });
+
+      rows.sort((a,b)=>{
+        if(a.slot && b.slot){
+          if(a.slot.from === b.slot.from) return (a.room.block+a.room.name).localeCompare(b.room.block+b.room.name);
+          return a.slot.from < b.slot.from ? -1 : 1;
+        }
+        if(a.slot && !b.slot) return -1;
+        if(!a.slot && b.slot) return 1;
+        return (a.room.block+a.room.name).localeCompare(b.room.block+b.room.name);
+      });
+
+      availTbody.innerHTML='';
+      if(!rows.length){
+        availTbody.innerHTML = `<tr><td colspan="7" class="muted">No rooms match.</td></tr>`;
+        availCount.textContent = '0 found';
+        return;
+      }
+      rows.forEach((it,i)=>{
+        const r = it.room, slot = it.slot;
+        const tr = document.createElement('tr');
+        const nightsText = slot ? nights(slot.from, slot.to) : '—';
+        const fromText = slot ? slot.from : '—';
+        const toText = slot ? slot.to : '—';
+        const action = slot
+          ? `<button class="ghost useForBookingBtn" data-room="${r.id}" data-from="${slot.from}" data-to="${slot.to}">Use in Booking</button>
+             <button class="ghost viewAllRangesBtn" data-room="${r.id}">View Ranges</button>`
+          : `<button class="ghost viewAllRangesBtn" data-room="${r.id}">View Ranges</button>`;
+        tr.innerHTML = `
+          <td>${i+1}</td>
+          <td>${r.block}</td>
+          <td>${r.name}</td>
+          <td>${fromText}</td>
+          <td>${toText}</td>
+          <td>${nightsText}</td>
+          <td>${action}</td>
+        `;
+        availTbody.appendChild(tr);
+      });
+      availCount.textContent = `${rows.filter(x=>x.slot).length} available${showNoAvail.checked ? ` / ${rows.length}`:''}`;
+
+      availTbody.querySelectorAll('.useForBookingBtn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          fromDate.value = btn.getAttribute('data-from');
+          toDate.value = btn.getAttribute('data-to');
+          blockFilter.value = availBlock.value || '';
+          renderRoomSelect();
+          roomSelect.value = btn.getAttribute('data-room');
+          const r = rooms.find(x=>x.id===roomSelect.value);
+          if(r) showRoomHint(r);
+          validate();
+          document.querySelector('.tab-btn[data-tab="bookTab"]').click();
+        });
+      });
+      // Remind buttons
+      bookingTbody.querySelectorAll('.remindBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x=>x.id===id);
+          if(b) sendReminderForBooking(b);
+        });
+      });
+      availTbody.querySelectorAll('.viewAllRangesBtn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const r = rooms.find(x=>x.id===btn.getAttribute('data-room'));
+          const eff = effectiveRanges(r);
+          if(!eff.length){ alert('No upcoming availability.'); return; }
+          const lines = eff.slice(0,10).map(x=>`${x.from} → ${x.to}`).join('\\n');
+          alert(`Availability for ${r.block} — ${r.name}\\n\\n${lines}${eff.length>10?`\\n…(+${eff.length-10} more)`:''}`);
+        });
+      });
+      // Remind buttons
+      bookingTbody.querySelectorAll('.remindBtn').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          const id = e.target.getAttribute('data-id');
+          const b = bookings.find(x=>x.id===id);
+          if(b) sendReminderForBooking(b);
+        });
+      });
+    }
+
+    // ======= Admin lock =======
+    async function setAdminUI(){
+      adminStatus.textContent = adminUnlocked ? 'Unlocked' : 'Locked';
+      adminStatus.style.background = adminUnlocked ? 'linear-gradient(90deg,#27ecb8,#6dd3ff)' : '';
+      const toDisable = adminContent.querySelectorAll('input,select,textarea,button');
+      toDisable.forEach(el=>{
+        if(el === adminUnlockBtn || el === adminLockBtn || el === adminPinInput || el === adminPinSetBtn) return;
+        el.disabled = !adminUnlocked;
+      });
+      adminContent.classList.toggle('admin-locked', !adminUnlocked);
+    }
+
+    // ======= Admin: Room meta (rename/move/delete) =======
+    function isRoomNameTaken(block, name, exceptId){
+      return rooms.some(r => r.block===block && r.name===name && r.id!==exceptId);
+    }
+    async function renameMoveRoom(){
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const id = roomsList.value; if(!id){ alert('Select a room.'); return; }
+      const idx = rooms.findIndex(r=>r.id===id);
+      const newBlock = uc(roomBlockInput.value); const newName = roomNameInput.value.trim();
+      if(!newBlock){ alert('Block is required.'); return; }
+      if(!newName){ alert('Room name is required.'); return; }
+      if(isRoomNameTaken(newBlock, newName, id)){ alert(`A room named "${newName}" already exists in block ${newBlock}.`); return; }
+
+      const oldBlock = rooms[idx].block, oldName = rooms[idx].name;
+      rooms[idx].block = newBlock; rooms[idx].name = newName;
+      await commitRooms(rooms);
+
+      // update bookings for this room in memory & DB
+      bookings.forEach(b => { if(b.room_id===id){ b.block=newBlock; b.room_name=newName; }});
+      await commitBookings(bookings);
+
+      alert(`Room updated: ${oldBlock}/${oldName} → ${newBlock}/${newName}`);
+      renderBlockFilter(); renderRoomsList(); renderRoomSelect(); renderAvailableList(); renderBookings();
+    }
+    async function deleteRoom(){
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const id = roomsList.value; if(!id){ alert('Select a room.'); return; }
+      const room = rooms.find(r=>r.id===id);
+      const used = bookings.filter(b=>b.room_id===id).length;
+      let ok = true;
+      if(used>0){
+        ok = confirm(`This room has ${used} booking(s). Delete the room and REMOVE those bookings?`);
+      }else{
+        ok = confirm(`Delete ${room.block}/${room.name}?`);
+      }
+      if(!ok) return;
+      if(used>0){
+        bookings = bookings.filter(b=>b.room_id!==id);
+        await deleteBookingsByRoomId(id);
+      }
+      rooms = rooms.filter(r=>r.id!==id);
+      await deleteRoomById(id);
+      alert('Room deleted.');
+      renderBlockFilter(); renderRoomsList(); renderRoomSelect(); renderAvailableList(); renderBookings();
+    }
+
+    // ======= Admin: Rename Block =======
+    async function renameBlockAll(){
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const oldB = blockRenameOld.value; const newB = uc(blockRenameNew.value);
+      if(!oldB){ alert('Choose an old block.'); return; }
+      if(!newB){ alert('Enter a new block.'); return; }
+      if(oldB === newB){ alert('Old and new block are the same.'); return; }
+
+      const oldRooms = rooms.filter(r=>r.block===oldB);
+      const conflicts = oldRooms.filter(r => rooms.some(o => o.block===newB && o.name===r.name && o.id!==r.id));
+      if(conflicts.length){
+        const sample = conflicts.slice(0,5).map(r=>r.name).join(', ');
+        alert(`Cannot rename: ${conflicts.length} room name(s) already exist in block ${newB}. Conflicts: ${sample}${conflicts.length>5?'…':''}`);
+        return;
+      }
+      if(!confirm(`Rename block ${oldB} → ${newB}? This updates ${oldRooms.length} room(s), their bookings, and transfers blackouts.`)) return;
+
+      rooms.forEach(r => { if(r.block===oldB) r.block=newB; });
+      await commitRooms(rooms);
+
+      bookings.forEach(b=>{
+        const rm = rooms.find(r=>r.id===b.room_id);
+        if(rm) b.block = rm.block;
+      });
+      await commitBookings(bookings);
+
+      const merged = mergeRanges((blackouts[newB]||[]).concat(blackouts[oldB]||[]));
+      if(blackouts[oldB]) delete blackouts[oldB];
+      if(merged.length) blackouts[newB] = merged;
+      await commitBlackouts(blackouts);
+
+      alert('Block renamed.');
+      blockRenameNew.value='';
+      renderBlockFilter(); renderRoomsList(); renderRoomSelect(); renderAvailableList(); renderBookings();
+    }
+
+    // ======= CSV =======
+    function parseCsv(text){
+      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
+      const rows=[];
+      for(const ln of lines){
+        const parts = ln.split(',').map(s=>s.trim());
+        if(parts[0]?.toLowerCase() === 'block') continue;
+        if(parts.length<4) continue;
+        const [block, roomName, from, to] = parts;
+        if(!block || !roomName || !validDate(from) || !validDate(to) || !(parseISO(from)<parseISO(to))) continue;
+        rows.push({block, roomName, from, to});
+      }
+      return rows;
+    }
+    async function importCsvRows(rows, replace){
+      const key = (b,n)=> `${b}||${n}`;
+      const map = new Map(rooms.map(r=>[key(r.block,r.name), r]));
+      const grouped = {};
+      for(const r of rows){
+        const k=key(r.block,r.roomName);
+        if(!grouped[k]) grouped[k]=[];
+        grouped[k].push({from:r.from, to:r.to});
+      }
+      for(const k of Object.keys(grouped)){
+        let room = map.get(k);
+        const [block,name] = k.split('||');
+        if(!room){
+          room = {id:crypto.randomUUID(), block, name, ranges:[]};
+          rooms.push(room); map.set(k, room);
+        }
+        if(replace){ room.ranges = mergeRanges(grouped[k]); }
+        else { room.ranges = mergeRanges((room.ranges||[]).concat(grouped[k])); }
+      }
+      await commitRooms(rooms);
+      renderRoomsList(); renderRoomSelect(); renderAvailableList();
+    }
+
+    // ======= Events (BOOK) =======
+    blockFilter.addEventListener('change', ()=>{ renderRoomSelect(); validate(); });
+    fromDate.addEventListener('change', ()=>{ renderRoomSelect(); validate(); });
+    toDate.addEventListener('change',   ()=>{ renderRoomSelect(); validate(); });
+    roomSelect.addEventListener('change', ()=>{ const room=rooms.find(r=>r.id===roomSelect.value); showRoomHint(room); validate(); });
+    guestName.addEventListener('input', validate);
+    guestPhone.addEventListener('input', validate);
+    suggestBtn.addEventListener('click', ()=>{
+      const room = rooms.find(r=>r.id===roomSelect.value);
+      if(!room){ alert('Select a room first.'); return; }
+      const f = validDate(fromDate.value) ? fromDate.value : fmtISO(new Date());
+      const n = (validDate(fromDate.value)&&validDate(toDate.value)&&parseISO(fromDate.value)<parseISO(toDate.value))
+        ? nights(fromDate.value,toDate.value) : 1;
+      const s = nextAvailableRangeForRoom(room, f, Math.max(1,n));
+      if(s){ fromDate.value=s.from; toDate.value=s.to; renderRoomSelect(); showRoomHint(room); validate(); }
+      else alert('No continuous availability found for this room.');
+    });
+    bookBtn.addEventListener('click', book);
+
+    // ======= Events (AVAILABLE) =======
+    availRefreshBtn.addEventListener('click', renderAvailableList);
+    availBlock.addEventListener('change', renderAvailableList);
+    showNoAvail.addEventListener('change', renderAvailableList);
+
+    // ======= Events (ADMIN) =======
+    adminUnlockBtn.addEventListener('click', async ()=>{
+      const pin = adminPinInput.value.trim();
+      if(!pin){ alert('Enter PIN'); return; }
+      const current = await getPin();
+      if(pin === current){ adminUnlocked = true; setAdminUI(); }
+      else alert('Incorrect PIN');
+    });
+    adminLockBtn.addEventListener('click', ()=>{ adminUnlocked = false; setAdminUI(); });
+
+    adminPinSetBtn.addEventListener('click', async ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const pin = adminPinInput.value.trim();
+      if(!pin || pin.length < 4){ alert('PIN must be at least 4 digits/characters.'); return; }
+      await setPin(pin); alert('PIN updated.'); adminPinInput.value = '';
+    });
+
+    roomsList.addEventListener('change', ()=>{ renderRangesEditor(); renderRoomMetaEditor(); });
+    addBlockRoomsBtn.addEventListener('click', async ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const block = uc(prompt('Enter Block name (e.g., G):')); if(!block) return;
+      const count = parseInt(prompt('How many rooms to add to Block '+block+'? (e.g., 20)'),10) || 0;
+      if(count<=0) return;
+      const nextIndex = (()=>{
+        const nums = rooms.filter(r=>r.block===block)
+          .map(r=> parseInt(r.name.split('-').pop(),10)).filter(n=>!isNaN(n));
+        return (nums.length?Math.max(...nums):0)+1;
+      })();
+      const newOnes=[];
+      for(let i=0;i<count;i++){
+        const name = `${block}-${String(nextIndex+i).padStart(3,'0')}`;
+        if(isRoomNameTaken(block,name)) continue;
+        newOnes.push({id:crypto.randomUUID(), block, name, ranges:[]});
+      }
+      rooms = rooms.concat(newOnes);
+      await commitRooms(rooms);
+      renderBlockFilter(); renderRoomsList(); renderAvailableList(); renderRoomSelect();
+      alert(`Added ${newOnes.length} room(s) to Block ${block}.`);
+    });
+
+    async function saveRanges(){
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const id=roomsList.value; if(!id){ alert('Select a room.'); return; }
+      const lines = rangesText.value.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
+      const parsed=[];
+      for(const line of lines){ const r = parseRangeLine(line); if(r) parsed.push(r); }
+      const idx=rooms.findIndex(r=>r.id===id);
+      rooms[idx].ranges = mergeRanges(parsed);
+      await commitRooms(rooms);
+      renderRoomsList(); renderRoomSelect(); renderAvailableList();
+      alert('Availability ranges saved.');
+    }
+    saveRangesBtn.addEventListener('click', saveRanges);
+    sampleRangesBtn.addEventListener('click', ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const id=roomsList.value; if(!id){ alert('Select a room first.'); return; }
+      const base=new Date();
+      const r1f=fmtISO(base), r1t=fmtISO(new Date(base.getTime()+3*86400000));
+      const r2f=fmtISO(new Date(base.getTime()+5*86400000)), r2t=fmtISO(new Date(base.getTime()+9*86400000));
+      rangesText.value = `${r1f} to ${r1t}\\n${r2f} to ${r2t}`;
+    });
+
+    csvImportBtn.addEventListener('click', ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const file=csvFile.files && csvFile.files[0];
+      if(!file){ alert('Choose a CSV file first.'); return; }
+      const reader=new FileReader();
+      reader.onload = async () =>{
+        const rows=parseCsv(reader.result||'');
+        if(!rows.length){ alert('No valid rows found.'); return; }
+        await importCsvRows(rows, csvReplace.checked);
+        alert(`Imported ${rows.length} row(s).`);
+      };
+      reader.readAsText(file);
+    });
+
+    blackoutBlock.addEventListener('change', renderBlackoutEditor);
+    saveBlackoutBtn.addEventListener('click', async ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const blk=blackoutBlock.value; if(!blk) return;
+      const lines=blackoutText.value.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
+      const arr=[]; for(const line of lines){ const r=parseRangeLine(line); if(r) arr.push(r); }
+      blackouts[blk]=mergeRanges(arr);
+      await commitBlackouts(blackouts);
+      renderRoomSelect(); renderAvailableList();
+      alert('Blackouts saved for block '+blk+'.');
+    });
+    sampleBlackoutBtn.addEventListener('click', ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const base=new Date();
+      const f=fmtISO(new Date(base.getTime()+4*86400000));
+      const t=fmtISO(new Date(base.getTime()+6*86400000));
+      blackoutText.value = `${f} to ${t}`;
+    });
+
+    roomMetaSaveBtn.addEventListener('click', renameMoveRoom);
+    roomDeleteBtn.addEventListener('click', deleteRoom);
+    blockRenameBtn.addEventListener('click', renameBlockAll);
+
+    exportCsvBtn.addEventListener('click', ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      const head=['#','From','To','Nights','Block','Room','Guest','Phone'];
+      const lines=[head.join(',')];
+      sortBy(bookings,b=>`${b.from}-${b.block}-${b.room_name}`).forEach((b,i)=>{
+        lines.push([i+1,b.from,b.to,nights(b.from,b.to),b.block,b.room_name,`"${b.guest_name}"`,`"${b.guest_phone}"`].join(','));
+      });
+      const blob = new Blob([lines.join('\\n')],{type:'text/csv'});
+      const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='bookings.csv'; a.click(); URL.revokeObjectURL(url);
+    });
+
+    resetBtn.addEventListener('click', async ()=>{
+      if(!adminUnlocked){ alert('Unlock admin first'); return; }
+      if(confirm('This will clear ALL rooms, bookings, and blackouts from Supabase. Continue?')){
+        await supabase.from('rooms').delete().neq('id','');
+        await supabase.from('bookings').delete().neq('id','');
+        await supabase.from('blackouts').delete().neq('block','');
+        rooms=[]; bookings=[]; blackouts={};
+        await seedRoomsIfEmpty();
+        renderAll();
+      }
+    });
+
+    // ======= Init =======
+    async function renderAll(){
+      renderBlockFilter();
+      renderRoomsList();
+      renderRoomSelect();
+      renderBookings();
+      validate();
+      renderAvailableList();
+    }
+
+    (async function init(){
+      // Change the storage pill to Supabase without changing layout
+      const pills = document.querySelectorAll('.pill');
+      pills.forEach(p => {
+        if(p.textContent.includes('Storage:')) p.textContent = 'Storage: Supabase';
+      });
+
+      await fetchAll();
+      await seedRoomsIfEmpty();
+
+      const today=new Date(), tomorrow=new Date(today.getTime()+86400000);
+      if(!fromDate.value){ fromDate.value=fmtISO(today); toDate.value=fmtISO(tomorrow); }
+      await renderAll();
+      await setAdminUI();
+
+      // Optional: realtime (comment out if not needed)
+      try{
+        supabase.channel('rb7_changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, async () => { await fetchAll(); renderAll(); })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, async () => { await fetchAll(); renderAll(); })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'blackouts' }, async () => { await fetchAll(); renderAll(); })
+          .subscribe();
+      }catch(e){ console.warn('Realtime not enabled', e); }
+    })();
+  </script>
 </head>
 <body>
-  <!-- Debug Overlay -->
-  <div id="debugPanel">
-    <div style="font-weight:700;margin-bottom:6px">Debug</div>
-    <pre id="debugLog"></pre>
-  </div>
-
   <div class="wrap">
-    <h1>
-      Room Booking (rb7)
-      <span class="pill" id="storageBadge">Storage: Supabase</span>
-      <span class="pill">Intervals: <b>[From, To)</b></span>
-      <span class="pill" id="sbStatus">Supabase: ?</span>
+   <h1>
+      Room Booking 
+      <!-- <span class="pill" style="margin-left:8px">Storage: Supabase</span>
+      <span class="pill" style="margin-left:8px">Intervals: <b>[From, To)</b></span> -->
     </h1>
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab-btn active" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="availTab">Available</button>
+      <button class="tab-btn active" data-tab="bookTab">Book</button>
       <button class="tab-btn" data-tab="adminTab">Admin</button>
     </div>
 
@@ -110,20 +977,20 @@
             <div id="whyDisabled" class="hint warn"></div>
             <button id="bookBtn" disabled>Book</button>
           </div>
-        </div>
-        <div class="hint">When a room with availability <b>10→12</b> is booked <b>10→11</b>, the leftover <b>11→12</b> becomes available instantly.</div>
-      </div>
+        <!-- </div>
+        <div class="hint">If a room had availability <b>10→12</b> and someone books <b>10→11</b>, the leftover <b>11→12</b> becomes available instantly.</div>
+      </div> -->
 
       <div class="card">
         <h2 style="margin:0 0 8px;font-size:20px">Bookings</h2>
         <table class="list" id="bookingTable">
           <thead>
             <tr>
-              <th>#</th><th>Ref</th><th>From</th><th>To</th><th>Nights</th><th>Block</th><th>Room</th><th>Guest</th><th>Phone</th><th>Actions</th>
+              <th>#</th><th>From</th><th>To</th><th>Nights</th><th>Block</th><th>Room</th><th>Guest</th><th>Phone</th><th></th>
             </tr>
           </thead>
           <tbody id="bookingTbody">
-            <tr><td colspan="10" class="muted">No bookings yet.</td></tr>
+            <tr><td colspan="9" class="muted">No bookings yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -150,7 +1017,9 @@
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:6px">
           <h2 style="margin:0;font-size:20px">Available Rooms (Next Slot)</h2>
-          <div class="row"><span id="availCount" class="pill">0 found</span></div>
+          <div class="row">
+            <span id="availCount" class="pill">0 found</span>
+          </div>
         </div>
         <table class="list">
           <thead>
@@ -182,1098 +1051,111 @@
           <input id="adminPinInput" type="password" placeholder="Enter PIN (default 1234)" style="max-width:220px" />
           <button id="adminPinSetBtn" class="ghost" title="Set/Change PIN (unlocked only)">Set/Change PIN</button>
         </div>
-        <div class="hint">Admin can edit rooms/blocks & availability, import availability CSV, and import Excel bookings. Users can only book/cancel.</div>
+        <div class="hint">Admin can edit rooms/blocks & availability. Users can only book/cancel.</div>
       </div>
 
-      <!-- Manage Rooms -->
-      <div class="card">
-        <h3 style="margin:0 0 8px;font-size:18px">Manage Rooms</h3>
-        <div class="grid" style="margin-bottom:14px">
-          <div style="grid-column: span 6;">
-            <label for="renameRoomSelect">Select Room</label>
-            <select id="renameRoomSelect"></select>
+      <div id="adminContent">
+        <!-- Rooms + Availability + Room meta -->
+        <div class="card">
+          <div class="row" style="justify-content:space-between;margin-bottom:6px">
+            <h3 style="margin:0;font-size:18px">Rooms & Availability Ranges</h3>
+            <button id="addBlockRoomsBtn" class="ghost">+ Bulk Add Rooms</button>
           </div>
-          <div style="grid-column: span 3;">
-            <label for="newBlock">New Block</label>
-            <input id="newBlock" type="text" placeholder="e.g., A" />
-          </div>
-          <div style="grid-column: span 3;">
-            <label for="newName">New Room Name</label>
-            <input id="newName" type="text" placeholder="e.g., A-101" />
-          </div>
-          <div style="grid-column: span 12; margin-top:8px;" class="row">
-            <button id="renameBtn">Rename</button>
-            <button id="deleteRoomBtn" class="danger">Delete Room</button>
-          </div>
-        </div>
-        <hr class="sep"/>
-        <div class="grid">
-          <div style="grid-column: span 3;">
-            <label for="addBlock">Block</label>
-            <input id="addBlock" type="text" placeholder="e.g., B" />
-          </div>
-          <div style="grid-column: span 3;">
-            <label for="addName">Room Name</label>
-            <input id="addName" type="text" placeholder="e.g., B-205" />
-          </div>
-          <div style="grid-column: span 6;">
-            <label for="addRangesText">Initial Availability (optional)</label>
-            <textarea id="addRangesText" rows="5" placeholder="One per line:
-YYYY-MM-DD to YYYY-MM-DD
-YYYY-MM-DD to YYYY-MM-DD"></textarea>
-            <div class="row" style="margin-top:8px">
-              <button id="sampleAddRangesBtn" class="ghost">Sample</button>
-              <button id="addRoomBtn">Add Room</button>
+          <div class="grid">
+            <div style="grid-column: span 6;">
+              <label for="roomsList">Rooms (select to edit)</label>
+              <select id="roomsList" size="12" class="mono"></select>
+              <div class="hint">Format: BLOCK / ROOM — (#ranges)</div>
             </div>
-            <div class="hint">If empty, room is created with no ranges.</div>
+            <div style="grid-column: span 6;">
+              <label for="rangesText">Availability Ranges</label>
+              <textarea id="rangesText" rows="8" placeholder="One per line: YYYY-MM-DD to YYYY-MM-DD"></textarea>
+              <div class="row" style="margin-top:8px">
+                <button id="saveRangesBtn">Save Ranges</button>
+                <button id="sampleRangesBtn" class="ghost">Sample: next 2 ranges</button>
+              </div>
+              <hr style="border-color:#24345a;border-top:none;margin:16px 0">
+              <h4 style="margin:0 0 8px;font-size:16px">Room details</h4>
+              <div class="grid">
+                <div style="grid-column: span 4;">
+                  <label for="roomBlockInput">Block</label>
+                  <input id="roomBlockInput" type="text" placeholder="e.g., A" />
+                </div>
+                <div style="grid-column: span 8;">
+                  <label for="roomNameInput">Room Name</label>
+                  <input id="roomNameInput" type="text" placeholder="e.g., A-001" />
+                </div>
+              </div>
+              <div class="row" style="margin-top:8px">
+                <button id="roomMetaSaveBtn">Rename / Move Room</button>
+                <button id="roomDeleteBtn" class="danger">Delete Room</button>
+              </div>
+              <div class="hint">Rename/move updates existing bookings to the new Block/Room. Delete can also remove its bookings (with confirmation).</div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Rooms + Availability editor -->
-      <div class="card" id="roomsAvailCard">
-        <h3 style="margin:0 0 8px;font-size:18px">Rooms & Availability Ranges</h3>
-        <div class="grid">
-          <div style="grid-column: span 6;">
-            <label for="roomsList">Rooms (select to edit)</label>
-            <select id="roomsList" size="10" class="mono"></select>
-          </div>
-          <div style="grid-column: span 6;">
-            <label for="rangesText">Availability Ranges</label>
-            <textarea id="rangesText" rows="8" placeholder="One per line: YYYY-MM-DD to YYYY-MM-DD"></textarea>
-            <div class="row" style="margin-top:8px">
-              <button id="saveRangesBtn">Save Ranges</button>
-              <button id="sampleRangesBtn" class="ghost">Sample</button>
+        <!-- CSV -->
+        <div class="card">
+          <h3 style="margin:0 0 8px;font-size:18px">Bulk CSV Import (Availability)</h3>
+          <div class="grid">
+            <div style="grid-column: span 6;">
+              <label>Upload CSV (columns: block,room,from,to)</label>
+              <input id="csvFile" type="file" accept=".csv,text/csv" />
+              <div class="row" style="margin-top:8px">
+                <label class="row" style="gap:6px"><input type="checkbox" id="csvReplace"> Replace existing availability</label>
+                <button id="csvImportBtn">Import CSV</button>
+              </div>
+            </div>
+            <div style="grid-column: span 6;">
+              <div class="hint">Sample rows:<br><span class="mono">A,A-001,2025-09-02,2025-09-05</span><br><span class="mono">B,B-014,2025-09-10,2025-09-15</span></div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Import Excel/CSV Bookings -->
-      <div class="card">
-        <h3 style="margin:0 0 8px;font-size:18px">Import Group Bookings (Excel/CSV)</h3>
-        <div class="grid">
-          <div style="grid-column: span 6;">
-            <label>Upload file</label>
-            <input id="bookingsFile" type="file" accept=".xlsx,.xls,.csv" />
-            <div class="row" style="margin-top:8px">
-              <label class="row" style="gap:6px"><input type="radio" name="importMode" value="all" checked> All-or-Nothing</label>
-              <label class="row" style="gap:6px"><input type="radio" name="importMode" value="best"> Best-Effort</label>
+        <!-- Blackouts + Tools -->
+        <div class="card">
+          <h3 style="margin:0 0 8px;font-size:18px">Block Blackouts & Tools</h3>
+          <div class="grid">
+            <div style="grid-column: span 4;">
+              <label for="blackoutBlock">Block</label>
+              <select id="blackoutBlock"></select>
             </div>
-            <div class="row" style="margin-top:8px">
-              <button id="downloadTemplateBtn" class="ghost">Download template (.xlsx)</button>
-              <button id="simulateImportBtn">Simulate</button>
-              <button id="runImportBtn">Import</button>
+            <div style="grid-column: span 8;">
+              <label for="blackoutText">Blackout Ranges</label>
+              <textarea id="blackoutText" rows="6" placeholder="YYYY-MM-DD to YYYY-MM-DD"></textarea>
+              <div class="row" style="margin-top:8px">
+                <button id="saveBlackoutBtn">Save Blackouts</button>
+                <button id="sampleBlackoutBtn" class="ghost">Sample range</button>
+              </div>
             </div>
-            <div class="hint">Headers: <span class="mono">booking_id</span>, <span class="mono">no_of_rooms</span>, <span class="mono">block</span>, <span class="mono">from</span>, <span class="mono">to</span>.</div>
-          </div>
-          <div style="grid-column: span 6;">
-            <label>Result</label>
-            <div id="importResult" class="status">No file loaded.</div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Blackouts + Tools -->
-      <div class="card">
-        <h3 style="margin:0 0 8px;font-size:18px">Block Blackouts & Tools</h3>
-        <div class="grid">
-          <div style="grid-column: span 4;">
-            <label for="blackoutBlock">Block</label>
-            <select id="blackoutBlock"></select>
-          </div>
-          <div style="grid-column: span 8;">
-            <label for="blackoutText">Blackout Ranges</label>
-            <textarea id="blackoutText" rows="6" placeholder="YYYY-MM-DD to YYYY-MM-DD"></textarea>
-            <div class="row" style="margin-top:8px">
-              <button id="saveBlackoutBtn">Save Blackouts</button>
-              <button id="sampleBlackoutBtn" class="ghost">Sample</button>
+            <div style="grid-column: span 12; margin-top:10px; padding-top:10px; border-top:1px solid #24345a">
+              <h4 style="margin:0 0 8px;font-size:16px">Rename Block</h4>
+              <div class="grid">
+                <div style="grid-column: span 4;">
+                  <label for="blockRenameOld">Old Block</label>
+                  <select id="blockRenameOld"></select>
+                </div>
+                <div style="grid-column: span 5;">
+                  <label for="blockRenameNew">New Block</label>
+                  <input id="blockRenameNew" type="text" placeholder="e.g., G" />
+                </div>
+                <div style="grid-column: span 3; align-self:end;">
+                  <button id="blockRenameBtn">Rename Block</button>
+                </div>
+              </div>
+              <div class="hint">Moves all rooms to the new block, updates their bookings, and transfers blackouts. Prevents name collisions.</div>
             </div>
           </div>
+
+          <div class="row" style="margin-top:12px">
+            <button id="exportCsvBtn">Export Bookings CSV</button>
+            <button id="resetBtn" class="ghost">Reset ALL Data</button>
+          </div>
         </div>
-        <div class="row" style="margin-top:12px">
-          <button id="exportCsvBtn">Export Bookings CSV</button>
-          <button id="resetBtn" class="ghost">Reset ALL Data</button>
-        </div>
-        <div class="footer">DEBUG build — errors surface in the bottom “Debug” panel.</div>
       </div>
     </section>
   </div>
-
-  <script>
-  /**********************
-   * DEBUG OVERLAY
-   **********************/
-  (function(){
-    const panel = document.getElementById('debugPanel');
-    const logEl = document.getElementById('debugLog');
-    function show(){ panel.style.display='block'; }
-    function log(...args){ show(); logEl.textContent += args.map(a=> typeof a==='string'?a:JSON.stringify(a,null,2)).join(' ')+'\\n'; }
-    window.__dbg = { log, show };
-    window.addEventListener('error', (e)=>{ log('❌ Uncaught error:', e.message); });
-    window.addEventListener('unhandledrejection', (e)=>{ log('❌ Unhandled promise:', e.reason?.message||String(e.reason)); });
-  })();
-
-  /**********************
-   * CONFIG (edit these)
-   **********************/
-  const SUPABASE_URL   = 'https://dtrvmdyxyirhalcmidiz.supabase.co';
-  const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0cnZtZHl4eWlyaGFsY21pZGl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU1MjMwODEsImV4cCI6MjA3MTA5OTA4MX0.hdyBmmJfdYPfTrUf3Kn2cG9u58ZUZgLZfXjRooV9ntI';
-  const WHATSAPP_WEBHOOK_URL = ''; // optional: your server that calls WhatsApp API
-  const ORG_NAME = 'Room Desk';
-  const SENDER_NAME = 'Reservations';
-
-  /******************************************
-   * Utility (dates, ranges, formatting)
-   ******************************************/
-  const $ = id => document.getElementById(id);
-  const parseISO = s => new Date(s+'T00:00:00');
-  const fmtISO = d => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
-  const nights = (f,t) => Math.max(0, Math.round((parseISO(t) - parseISO(f))/86400000));
-  const validDate = d => /^\\d{4}-\\d{2}-\\d{2}$/.test(d);
-  const sortBy = (arr, f) => arr.slice().sort((a,b)=> (f(a)>f(b)) - (f(a)<f(b)));
-  const uc = s => (s||'').trim().toUpperCase();
-
-  function mergeRanges(ranges){
-    if(!ranges?.length) return [];
-    const s = ranges
-      .filter(r=> validDate(r.from)&&validDate(r.to)&&parseISO(r.from)<parseISO(r.to))
-      .sort((a,b)=> a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
-    const out=[{...s[0]}];
-    for(let i=1;i<s.length;i++){
-      const prev=out[out.length-1], cur=s[i];
-      if(parseISO(prev.to) >= parseISO(cur.from)){
-        if(parseISO(cur.to) > parseISO(prev.to)) prev.to = cur.to;
-      } else out.push({...cur});
-    }
-    return out;
-  }
-  function unionContainsRange(mergedRanges, from, to){
-    if(!mergedRanges.length) return false;
-    let cursor = parseISO(from);
-    const target = parseISO(to);
-    for(const r of mergedRanges){
-      const rf=parseISO(r.from), rt=parseISO(r.to);
-      if(rf > cursor) return false;
-      if(rt > cursor) cursor = rt;
-      if(cursor >= target) return true;
-    }
-    return cursor >= target;
-  }
-  function subtractRange(ranges, cutFrom, cutTo){
-    const CF = parseISO(cutFrom), CT = parseISO(cutTo);
-    const out = [];
-    for(const r of mergeRanges(ranges||[])){
-      const RF = parseISO(r.from), RT = parseISO(r.to);
-      if(!(RF < CT && CF < RT)){ out.push(r); continue; }
-      if(RF < CF) out.push({from: fmtISO(RF), to: fmtISO(CF)});
-      if(CT < RT) out.push({from: fmtISO(CT), to: fmtISO(RT)});
-    }
-    return mergeRanges(out);
-  }
-
-  /****************************
-   * Supabase client + caches
-   ****************************/
-  const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-  let rooms = [];        // [{id, block, name, ranges:[{from,to}]}]
-  let bookings = [];     // [{...}]
-  let blackouts = {};    // { [block]: [{from,to}] }
-  let adminUnlocked = false;
-
-  // Elements
-  const blockFilter=$('blockFilter'), fromDate=$('fromDate'), toDate=$('toDate'), suggestBtn=$('suggestBtn'),
-        roomSelect=$('roomSelect'), roomAvailHint=$('roomAvailHint'),
-        guestName=$('guestName'), guestPhone=$('guestPhone'), bookBtn=$('bookBtn'), whyDisabled=$('whyDisabled'),
-        bookingTbody=$('bookingTbody');
-
-  const availBlock=$('availBlock'), availRefreshBtn=$('availRefreshBtn'), showNoAvail=$('showNoAvail'),
-        availTbody=$('availTbody'), availCount=$('availCount');
-
-  const adminStatus=$('adminStatus'), adminUnlockBtn=$('adminUnlockBtn'), adminLockBtn=$('adminLockBtn'),
-        adminPinInput=$('adminPinInput'), adminPinSetBtn=$('adminPinSetBtn'),
-        adminContent=document.getElementById('adminTab'),
-        roomsList=$('roomsList'), rangesText=$('rangesText'), saveRangesBtn=$('saveRangesBtn'),
-        sampleRangesBtn=$('sampleRangesBtn'),
-        bookingsFile=$('bookingsFile'), simulateImportBtn=$('simulateImportBtn'), runImportBtn=$('runImportBtn'),
-        downloadTemplateBtn=$('downloadTemplateBtn'), importResult=$('importResult'),
-        blackoutBlock=$('blackoutBlock'), blackoutText=$('blackoutText'),
-        saveBlackoutBtn=$('saveBlackoutBtn'), sampleBlackoutBtn=$('sampleBlackoutBtn'),
-        exportCsvBtn=$('exportCsvBtn'), resetBtn=$('resetBtn'),
-        renameRoomSelect=$('renameRoomSelect'), newBlock=$('newBlock'), newName=$('newName'),
-        renameBtn=$('renameBtn'), deleteRoomBtn=$('deleteRoomBtn'),
-        addBlock=$('addBlock'), addName=$('addName'), addRangesText=$('addRangesText'),
-        sampleAddRangesBtn=$('sampleAddRangesBtn'), addRoomBtn=$('addRoomBtn');
-
-  const sbStatus = $('sbStatus');
-
-  /***********************
-   * Supabase operations
-   ***********************/
-  async function dbLoadAll(){
-    const [r1, r2, r3] = await Promise.all([
-      supa.from('rooms').select('*').order('block').order('name'),
-      supa.from('bookings').select('*').order('from'),
-      supa.from('blackouts').select('*')
-    ]);
-    if(r1.error) throw r1.error;
-    if(r2.error) throw r2.error;
-    if(r3.error) throw r3.error;
-
-    rooms = (r1.data||[]).map(x=>({ id:x.id, block:x.block, name:x.name, ranges:x.ranges||[] }));
-    bookings = r2.data||[];
-    blackouts = {};
-    (r3.data||[]).forEach(row => { blackouts[row.block] = row.ranges||[]; });
-  }
-
-  async function dbUpsertRoomRanges(roomId, ranges){
-    const room = rooms.find(r=>r.id===roomId);
-    const payload = { ranges: mergeRanges(ranges) };
-    const { error } = await supa.from('rooms').update(payload).eq('id', roomId);
-    if(error) throw error;
-    room.ranges = payload.ranges;
-  }
-
-  async function dbSaveBlackouts(block, ranges){
-    const clean = mergeRanges(ranges);
-    const { error } = await supa
-      .from('blackouts')
-      .upsert({ block, ranges: clean }, { onConflict: 'block' });
-    if(error) throw error;
-    blackouts[block] = clean;
-  }
-
-  async function dbCreateBooking(entry){
-    const { data, error } = await supa.from('bookings').insert(entry).select().single();
-    if(error) throw error;
-    return data;
-  }
-
-  async function dbDeleteBooking(id){
-    const { error } = await supa.from('bookings').delete().eq('id', id);
-    if(error) throw error;
-  }
-
-  async function dbGetPin(){
-    const { data, error } = await supa.from('admin_pin').select('pin').limit(1).maybeSingle();
-    if(error) throw error;
-    return data?.pin || '1234';
-  }
-  async function dbSetPin(newPin){
-    const { error } = await supa.from('admin_pin').upsert({ id: 1, pin: newPin }, { onConflict: 'id' });
-    if(error) throw error;
-  }
-
-  /********************
-   * Availability calc
-   ********************/
-  function effectiveRanges(room, extraBookings=[]){
-    let eff = mergeRanges(room.ranges||[]);
-    const blk = mergeRanges(blackouts[room.block] || []);
-    for(const b of blk){ eff = subtractRange(eff, b.from, b.to); if(!eff.length) break; }
-    const rb = bookings.concat(extraBookings).filter(b=> b.room_id === room.id);
-    for(const bk of rb){ eff = subtractRange(eff, bk.from, bk.to); if(!eff.length) break; }
-    return eff;
-  }
-  function availableRoomsFor(from,to,blockSel){
-    return rooms.filter(r=>{
-      if(blockSel && r.block!==blockSel) return false;
-      const eff = effectiveRanges(r);
-      if(!unionContainsRange(eff, from, to)) return false;
-      return true;
-    }).sort((a,b)=> a.block.localeCompare(b.block) || a.name.localeCompare(b.name));
-  }
-
-  /***************
-   * WhatsApp send
-   ***************/
-  function formatBookingMsg(bk, kind='new'){
-    const nightsTxt = nights(bk.from, bk.to);
-    const header = (kind==='vacate')
-      ? `Reminder to vacate room`
-      : (kind==='resend' ? `Booking details (copy)` : `Booking confirmed`);
-    const lines = [
-      `*${header}* — ${ORG_NAME}`,
-      ``,
-      `Guest: ${bk.guest_name||'-'}`,
-      `Phone: ${bk.guest_phone||'-'}`,
-      `Block/Room: ${bk.block} — ${bk.room_name}`,
-      `From: ${bk.from}`,
-      `To: ${bk.to}  (Nights: ${nightsTxt})`,
-      bk.booking_ref ? `Ref: ${bk.booking_ref}` : ``,
-      ``,
-      (kind==='vacate')
-        ? `Kindly vacate the room on ${bk.to}. If you need extension, please reply.`
-        : `If any changes are needed, please reply to this message.`,
-      ``,
-      `— ${SENDER_NAME}`
-    ].filter(Boolean);
-    return lines.join('\\n');
-  }
-
-  
-  async function sendWhatsApp(bk, kind='new'){
-    const phone = String(bk.guest_phone||'').replace(/[^\d+]/g,'');
-    const text = formatBookingMsg(bk, kind);
-    const url = `https://api.whatsapp.com/send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
-  }
-
-
-  /**********************
-   * Rendering helpers
-   **********************/
-  function blocksList(){ return [...new Set(rooms.map(r=>r.block))].sort(); }
-  function renderBlocksInto(selectEl){
-    const blocks = blocksList();
-    selectEl.innerHTML = '<option value=\"\">All Blocks</option>'+blocks.map(b=>`<option value=\"${b}\">${b}</option>`).join('');
-  }
-  function renderBlockFilter(){
-    renderBlocksInto(blockFilter);
-    renderBlocksInto(availBlock);
-    const blocks = blocksList();
-    blackoutBlock.innerHTML = blocks.map(b=>`<option value=\"${b}\">${b}</option>`).join('');
-    if(!blackoutBlock.value && blocks.length) blackoutBlock.value = blocks[0];
-    renderBlackoutEditor();
-  }
-  function renderRoomsList(){
-    const sel = roomsList.value;
-    roomsList.innerHTML = '';
-    sortBy(rooms, r=>`${r.block}-${r.name}`).forEach(r=>{
-      const o=document.createElement('option');
-      o.value=r.id; o.textContent=`${r.block} / ${r.name} — (${(r.ranges||[]).length})`;
-      roomsList.appendChild(o);
-    });
-    if(sel && [...roomsList.options].some(o=>o.value===sel)) roomsList.value=sel;
-    renderRangesEditor();
-    renderManageRooms();
-  }
-  function renderRangesEditor(){
-    const id=roomsList.value; const room=rooms.find(r=>r.id===id);
-    rangesText.value = room ? mergeRanges(room.ranges||[]).map(r=>`${r.from} to ${r.to}`).join('\\n') : '';
-  }
-  function renderBlackoutEditor(){
-    const blk = blackoutBlock.value;
-    const merged = mergeRanges((blackouts[blk] || []));
-    blackoutText.value = merged.map(r=>`${r.from} to ${r.to}`).join('\\n');
-  }
-
-  function renderRoomSelect(){
-    roomAvailHint.textContent = '';
-    const f=fromDate.value, t=toDate.value;
-    roomSelect.innerHTML='';
-    if(!(validDate(f)&&validDate(t)) || !(parseISO(f) < parseISO(t))){
-      roomSelect.innerHTML='<option value=\"\">Select valid dates first</option>'; roomSelect.disabled=true; return;
-    }
-    const avail = availableRoomsFor(f,t, blockFilter.value);
-    if(avail.length===0){
-      roomSelect.innerHTML = `<option value=\"\">No rooms available on ${f} → ${t}</option>`; roomSelect.disabled=true;
-    } else {
-      roomSelect.innerHTML = ['<option value=\"\">Select a room</option>']
-        .concat(avail.map(r=>`<option value=\"${r.id}\">${r.block} — ${r.name}</option>`)).join('');
-      roomSelect.disabled=false;
-    }
-  }
-  function showRoomHint(room){
-    if(!room){ roomAvailHint.textContent=''; return; }
-    const eff = effectiveRanges(room);
-    const sample = eff.slice(0,5).map(r=>`${r.from} → ${r.to}`).join(' | ');
-    roomAvailHint.textContent = eff.length ? `Available now: ${sample}${eff.length>5?` (+${eff.length-5} more)`:''}` : 'No available ranges remaining.';
-  }
-  function explainDisabled(){
-    const reasons = [];
-    const f = fromDate.value, t = toDate.value;
-    const roomId = roomSelect.value;
-    const name = guestName.value.trim();
-    const phone = guestPhone.value.trim();
-
-    if(!validDate(f) || !validDate(t) || !(parseISO(f) < parseISO(t))) reasons.push('Pick a valid From and To');
-    if(!roomId) reasons.push('Choose a room');
-    if(name.length < 2) reasons.push('Enter guest name');
-    if(!/^[0-9+\\-\\s()]{7,}$/.test(phone)) reasons.push('Enter a valid phone');
-
-    if(roomId && validDate(f) && validDate(t) && (parseISO(f) < parseISO(t))){
-      const room = rooms.find(r=>r.id===roomId);
-      const eff = effectiveRanges(room);
-      if(!unionContainsRange(eff, f, t)) reasons.push('Room not available for the entire range');
-    }
-    whyDisabled.textContent = reasons.length ? ('Can’t book: ' + reasons.join(' • ')) : '';
-  }
-  function validate(){
-    const f=fromDate.value, t=toDate.value, roomId=roomSelect.value;
-    const name=guestName.value.trim(), phone=guestPhone.value.trim();
-    let ok = validDate(f)&&validDate(t)&&(parseISO(f)<parseISO(t)) && !!roomId && name.length>=2 && /^[0-9+\\-\\s()]{7,}$/.test(phone);
-    if(ok){
-      const room = rooms.find(r=>r.id===roomId);
-      const eff = effectiveRanges(room);
-      ok = unionContainsRange(eff, f, t);
-    }
-    bookBtn.disabled = !ok;
-    explainDisabled();
-  }
-  function nextAvailableRangeForRoom(room, minFrom, nightsNeeded){
-    const m = parseISO(minFrom), neededMs = nightsNeeded*86400000;
-    const eff = effectiveRanges(room);
-    for(const r of eff){
-      let start = parseISO(r.from);
-      if(start < m) start = m;
-      const endCandidate = new Date(start.getTime() + neededMs);
-      if(endCandidate <= parseISO(r.to)){ return {from: fmtISO(start), to: fmtISO(endCandidate)}; }
-    }
-    return null;
-  }
-
-  /****************
-   * Book / Cancel
-   ****************/
-  async function book(){
-    if(bookBtn.disabled) return;
-    const room = rooms.find(r=>r.id===roomSelect.value);
-    const entry = {
-      booking_ref: '',
-      from: fromDate.value,
-      to: toDate.value,
-      room_id: room.id,
-      block: room.block,
-      room_name: room.name,
-      guest_name: guestName.value.trim(),
-      guest_phone: guestPhone.value.trim()
-    };
-    try{
-      const saved = await dbCreateBooking(entry);
-      bookings.push(saved);
-      guestName.value=''; guestPhone.value='';
-      renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
-      alert(`Booked ${room.block} — ${room.name} for ${entry.from} → ${entry.to} (${nights(entry.from,entry.to)} nights).`);
-      sendWhatsApp(saved, 'new');
-    }catch(err){
-      __dbg.log('Error while booking:', err.message||err);
-      alert('Error while booking: '+err.message);
-    }
-  }
-
-  async function cancelBooking(id){
-    if(!confirm('Cancel this booking?')) return;
-    try{
-      await dbDeleteBooking(id);
-      bookings = bookings.filter(b=>b.id!==id);
-      renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
-    }catch(err){
-      __dbg.log('Error canceling booking:', err.message||err);
-      alert('Error canceling booking: '+err.message);
-    }
-  }
-
-  function renderBookings(){
-    bookingTbody.innerHTML='';
-    if(!bookings.length){
-      bookingTbody.innerHTML = `<tr><td colspan=\"10\" class=\"muted\">No bookings yet.</td></tr>`; return;
-    }
-    sortBy(bookings, b=>`${b.from}-${b.block}-${b.room_name}`).forEach((bk,i)=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML = `
-        <td>${i+1}</td><td>${bk.booking_ref || ''}</td><td>${bk.from}</td><td>${bk.to}</td><td>${nights(bk.from,bk.to)}</td>
-        <td>${bk.block}</td><td>${bk.room_name}</td><td>${bk.guest_name||''}</td><td>${bk.guest_phone||''}</td>
-        <td class=\"row\" style=\"gap:6px\">
-          <button data-id=\"${bk.id}\" class=\"ghost sendBtn\"   title=\"Resend booking details via WhatsApp\">Send Msg</button>
-          <button data-id=\"${bk.id}\" class=\"ghost vacBtn\"    title=\"Send vacate reminder via WhatsApp\">Vacate Reminder</button>
-          <button data-id=\"${bk.id}\" class=\"danger cancelBtn\">Cancel</button>
-        </td>`;
-      bookingTbody.appendChild(tr);
-    });
-    bookingTbody.querySelectorAll('.cancelBtn').forEach(btn=>{
-      btn.addEventListener('click', e=> cancelBooking(e.target.getAttribute('data-id')));
-    });
-    bookingTbody.querySelectorAll('.sendBtn').forEach(btn=>{
-      btn.addEventListener('click', e=>{
-        const id=e.target.getAttribute('data-id');
-        const bk=bookings.find(b=>b.id===id);
-        if(bk) sendWhatsApp(bk,'resend');
-      });
-    });
-    bookingTbody.querySelectorAll('.vacBtn').forEach(btn=>{
-      btn.addEventListener('click', e=>{
-        const id=e.target.getAttribute('data-id');
-        const bk=bookings.find(b=>b.id===id);
-        if(bk) sendWhatsApp(bk,'vacate');
-      });
-    });
-  }
-
-  /***********************
-   * Available tab render
-   ***********************/
-  function nextSlotFromToday(room){
-    const today = parseISO(fmtISO(new Date())); // strip time
-    const eff = effectiveRanges(room).filter(r => parseISO(r.to) > today);
-    if(!eff.length) return null;
-    const first = eff[0];
-    const start = parseISO(first.from) < today ? today : parseISO(first.from);
-    return {from: fmtISO(start), to: first.to};
-  }
-  function renderAvailableList(){
-    const blk = availBlock.value;
-    const includeNoAvail = showNoAvail.checked;
-    const rows = [];
-    rooms.forEach(r => {
-      if(blk && r.block !== blk) return;
-      const slot = nextSlotFromToday(r);
-      if(slot){ rows.push({room:r, slot}); }
-      else if(includeNoAvail){ rows.push({room:r, slot:null}); }
-    });
-    rows.sort((a,b)=>{
-      if(a.slot && b.slot){
-        if(a.slot.from === b.slot.from) return (a.room.block+a.room.name).localeCompare(b.room.block+b.room.name);
-        return a.slot.from < b.slot.from ? -1 : 1;
-      }
-      if(a.slot && !b.slot) return -1;
-      if(!a.slot && b.slot) return 1;
-      return (a.room.block+a.room.name).localeCompare(b.room.block+b.room.name);
-    });
-    availTbody.innerHTML='';
-    if(!rows.length){
-      availTbody.innerHTML = `<tr><td colspan=\"7\" class=\"muted\">No rooms match.</td></tr>`;
-      availCount.textContent = '0 found';
-      return;
-    }
-    rows.forEach((it,i)=>{
-      const r = it.room, slot = it.slot;
-      const tr = document.createElement('tr');
-      const nightsText = slot ? nights(slot.from, slot.to) : '—';
-      const fromText = slot ? slot.from : '—';
-      const toText = slot ? slot.to : '—';
-      const action = slot
-        ? `<button class=\"ghost useForBookingBtn\" data-room=\"${r.id}\" data-from=\"${slot.from}\" data-to=\"${slot.to}\">Use in Booking</button>
-           <button class=\"ghost viewAllRangesBtn\" data-room=\"${r.id}\">View Ranges</button>`
-        : `<button class=\"ghost viewAllRangesBtn\" data-room=\"${r.id}\">View Ranges</button>`;
-      tr.innerHTML = `
-        <td>${i+1}</td><td>${r.block}</td><td>${r.name}</td><td>${fromText}</td><td>${toText}</td><td>${nightsText}</td><td>${action}</td>
-      `;
-      availTbody.appendChild(tr);
-    });
-    availCount.textContent = `${rows.filter(x=>x.slot).length} available${showNoAvail.checked ? ` / ${rows.length}`:''}`;
-    availTbody.querySelectorAll('.useForBookingBtn').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        fromDate.value = btn.getAttribute('data-from');
-        toDate.value = btn.getAttribute('data-to');
-        blockFilter.value = availBlock.value || '';
-        renderRoomSelect();
-        roomSelect.value = btn.getAttribute('data-room');
-        const r = rooms.find(x=>x.id===roomSelect.value);
-        if(r) showRoomHint(r);
-        validate();
-        document.querySelector('.tab-btn[data-tab="bookTab"]').click();
-      });
-    });
-    availTbody.querySelectorAll('.viewAllRangesBtn').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const r = rooms.find(x=>x.id===btn.getAttribute('data-room'));
-        const eff = effectiveRanges(r);
-        if(!eff.length){ alert('No upcoming availability.'); return; }
-        const lines = eff.slice(0,10).map(x=>`${x.from} → ${x.to}`).join('\\n');
-        alert(`Availability for ${r.block} — ${r.name}\\n\\n${lines}${eff.length>10?`\\n…(+${eff.length-10} more)`:''}`);
-      });
-    });
-  }
-
-  /****************
-   * Admin / Import
-   ****************/
-  
-  
-  function setAdminUI(){
-    adminStatus.textContent = adminUnlocked ? 'Unlocked' : 'Locked';
-    adminStatus.classList.toggle('badge-ok', adminUnlocked);
-    adminContent.querySelectorAll('input,select,textarea,button').forEach(el=>{
-      el.disabled = !adminUnlocked;
-    });
-    [adminUnlockBtn, adminLockBtn, adminPinInput, adminPinSetBtn].forEach(el=>{
-      if(el) el.disabled = false;
-    });
-    adminContent.classList.toggle('admin-locked', !adminUnlocked);
-  }
-
-
-
-  async function getPin(){ return await dbGetPin(); }
-  async function setPin(pin){ await dbSetPin(pin); }
-
-  function parseRangeLine(line){
-    const parts = [...line.matchAll(/(\\d{4}-\\d{2}-\\d{2})/g)].map(m=>m[1]);
-    if(parts.length >= 2){
-      const from = parts[0], to = parts[1];
-      if(validDate(from) && validDate(to) && parseISO(from) < parseISO(to)) return {from, to};
-    }
-    return null;
-  }
-
-  function normalizeHeader(h){ return (h||'').toString().trim().toLowerCase().replace(/\\s+/g,'_'); }
-  function excelDateToISO(val){
-    if(val instanceof Date){ return fmtISO(val); }
-    if(typeof val === 'number'){ const d = new Date(Math.round((val - 25569) * 86400 * 1000)); return fmtISO(d); }
-    if(typeof val === 'string'){
-      const s = val.trim();
-      if(/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;
-      const m = s.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);
-      if(m){
-        const dd = m[1].padStart(2,'0'), mm = m[2].padStart(2,'0'), yy = m[3];
-        return `${yy}-${mm}-${dd}`;
-      }
-    }
-    return '';
-  }
-  function readWorkbook(file){
-    return new Promise((resolve,reject)=>{
-      const reader = new FileReader();
-      reader.onload = (e)=>{
-        try{
-          const data = new Uint8Array(e.target.result);
-          const wb = XLSX.read(data, {type:'array', cellDates:true});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, {defval:'', raw:true});
-          resolve(json);
-        }catch(err){ reject(err); }
-      };
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(file);
-    });
-  }
-  function readCSV(file){
-    return new Promise((resolve,reject)=>{
-      const reader = new FileReader();
-      reader.onload = ()=>{
-        const text = reader.result || '';
-        const lines = text.split(/\\r?\\n/).filter(Boolean);
-        if(!lines.length) return resolve([]);
-        const headers = lines[0].split(',').map(normalizeHeader);
-        const rows=[];
-        for(let i=1;i<lines.length;i++){
-          const cols = lines[i].split(',').map(s=>s.trim());
-          const obj={};
-          headers.forEach((h,idx)=>obj[h]=cols[idx]||'');
-          rows.push(obj);
-        }
-        resolve(rows);
-      };
-      reader.onerror = reject;
-      reader.readAsText(file);
-    });
-  }
-  function mapBookingRow(obj){
-    const o={}; for(const k in obj){ o[normalizeHeader(k)] = obj[k]; }
-    const get = (...names)=> { for(const n of names){ const v = o[n]; if(v!==undefined && v!=='') return v; } return ''; };
-    const bookingRef = get('booking_id','bookingid','id','ref','reference');
-    const countRaw = get('no_of_rooms','rooms','room_count','count');
-    const block = uc(get('block','block_name'));
-    let from = get('from','from_date','start','check_in','start_date','date_from','dates');
-    let to   = get('to','to_date','end','check_out','end_date','date_to','dates');
-    const rangeOne = get('range','date_range','dates');
-    if(rangeOne && (!from || !to)){
-      const r=parseRangeLine(rangeOne); if(r){ from=r.from; to=r.to; }
-    }
-    from = excelDateToISO(from); to = excelDateToISO(to);
-    const count = parseInt(countRaw,10) || 0;
-    return {bookingRef, count, block, from, to};
-  }
-  function validateMappedRow(r){
-    const errs=[];
-    if(!r.bookingRef) errs.push('booking_id missing');
-    if(!r.block) errs.push('block missing');
-    if(!(validDate(r.from)&&validDate(r.to)&&parseISO(r.from)<parseISO(r.to))) errs.push('bad dates');
-    if(!(r.count>0)) errs.push('no_of_rooms missing/0');
-    return errs;
-  }
-  function roomsAvailableForRangeInBlock(block, from, to, extraBookings){
-    return rooms.filter(r=>{
-      if(r.block !== block) return false;
-      const eff = effectiveRanges(r, extraBookings);
-      return unionContainsRange(eff, from, to);
-    }).sort((a,b)=> a.name.localeCompare(b.name));
-  }
-  function allocateBatch(rows, mode){ // mode: 'all' | 'best'
-    const provisional=[];
-    const results=[];
-    for(const row of rows){
-      const available = roomsAvailableForRangeInBlock(row.block, row.from, row.to, provisional);
-      const needed = row.count;
-      if(available.length >= needed){
-        const picked = available.slice(0, needed);
-        picked.forEach(r=>{
-          provisional.push({
-            id:'tmp_'+crypto.randomUUID(), booking_ref: row.bookingRef,
-            from: row.from, to: row.to,
-            room_id: r.id, block: r.block, room_name: r.name,
-            guest_name:'', guest_phone:'', created_at: new Date().toISOString()
-          });
-        });
-        results.push({row, allocated: picked.map(p=>p.name), status:'ok'});
-      }else{
-        if(mode==='all'){
-          results.push({row, allocated: [], status:`fail: need ${needed}, only ${available.length}`});
-        }else{
-          const picked = available;
-          picked.forEach(r=>{
-            provisional.push({
-              id:'tmp_'+crypto.randomUUID(), booking_ref: row.bookingRef,
-              from: row.from, to: row.to,
-              room_id: r.id, block: r.block, room_name: r.name,
-              guest_name:'', guest_phone:'', created_at: new Date().toISOString()
-            });
-          });
-          results.push({row, allocated: picked.map(p=>p.name), status:`partial: ${picked.length}/${needed}`});
-        }
-      }
-    }
-    const anyFail = results.some(r=>r.status.startsWith('fail'));
-    return {provisional, results, anyFail};
-  }
-  function renderImportSummary(sum){
-    const lines=[];
-    sum.results.forEach((r,i)=>{
-      lines.push(`${i+1}. Ref=${r.row.bookingRef}  Block=${r.row.block}  ${r.row.from}→${r.row.to}  Rooms requested=${r.row.count}  Allocated=${r.allocated.length}  Status=${r.status}`+(r.allocated.length? `\\n   Rooms: ${r.allocated.join(', ')}` : ''));
-    });
-    if(!sum.results.length) lines.push('No rows detected.');
-    importResult.textContent = lines.join('\\n') || '—';
-  }
-  async function readBookingsFileUnified(file){
-    const ext = (file.name.split('.').pop()||'').toLowerCase();
-    let rowsRaw=[];
-    if(ext==='csv'){ rowsRaw = await readCSV(file); }
-    else { rowsRaw = await readWorkbook(file); }
-    const mapped = rowsRaw.map(mapBookingRow);
-    const val = mapped.map(r=> ({r, errs: validateMappedRow(r)}));
-    return {mapped, val};
-  }
-  async function simulateOrImport(performImport){
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const f = bookingsFile.files && bookingsFile.files[0];
-    if(!f){ alert('Choose a file first.'); return; }
-    importResult.textContent = 'Reading…';
-    try{
-      const {mapped, val} = await readBookingsFileUnified(f);
-      const bad = val.filter(v=>v.errs.length);
-      if(bad.length){
-        importResult.textContent = '⚠️ Some rows have issues:\\n' + bad.slice(0,20)
-          .map(v=>`- Ref=${v.r.bookingRef||'?'} Block=${v.r.block||'?'} ${v.r.from||'?'}→${v.r.to||'?'} Rooms=${v.r.count||'?'} :: ${v.errs.join(', ')}`).join('\\n')
-          + (bad.length>20?`\\n…(+${bad.length-20} more)`: '');
-        if(performImport) return;
-        return;
-      }
-      const mode = (document.querySelector('input[name=\"importMode\"]:checked')?.value) || 'all';
-      const sum = allocateBatch(mapped, mode);
-      renderImportSummary(sum);
-      if(performImport){
-        if(sum.anyFail && mode==='all'){ alert('Import blocked: All-or-Nothing mode and at least one row failed.'); return; }
-        const toCommit = sum.provisional.map(p => ({
-          booking_ref: p.booking_ref, from: p.from, to: p.to, room_id: p.room_id,
-          block: p.block, room_name: p.room_name, guest_name: p.guest_name, guest_phone: p.guest_phone
-        }));
-        const { data, error } = await supa.from('bookings').insert(toCommit).select();
-        if(error) throw error;
-        bookings = bookings.concat(data||[]);
-        importResult.textContent += `\\n\\n✅ Imported ${data?.length||0} booking(s).`;
-        renderRoomSelect(); renderBookings(); renderAvailableList(); validate();
-      }
-    }catch(err){
-      __dbg.log('Import error:', err.message||err);
-      importResult.textContent = 'Error: '+err.message;
-    }
-  }
-
-  /*********
-   * Events
-   *********/
-  document.querySelectorAll('.tab-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.tab).classList.add('active');
-    });
-  });
-
-  // Book tab
-  blockFilter.addEventListener('change', ()=>{ renderRoomSelect(); validate(); });
-  fromDate.addEventListener('change', ()=>{ renderRoomSelect(); validate(); });
-  toDate.addEventListener('change',   ()=>{ renderRoomSelect(); validate(); });
-  roomSelect.addEventListener('change', ()=>{ const room=rooms.find(r=>r.id===roomSelect.value); showRoomHint(room); validate(); });
-  guestName.addEventListener('input', validate);
-  guestPhone.addEventListener('input', validate);
-  suggestBtn.addEventListener('click', ()=>{
-    const room = rooms.find(r=>r.id===roomSelect.value);
-    if(!room){ alert('Select a room first.'); return; }
-    const f = validDate(fromDate.value) ? fromDate.value : fmtISO(new Date());
-    const n = (validDate(fromDate.value)&&validDate(toDate.value)&&parseISO(fromDate.value)<parseISO(toDate.value))
-      ? nights(fromDate.value,toDate.value) : 1;
-    const s = nextAvailableRangeForRoom(room, f, Math.max(1,n));
-    if(s){ fromDate.value=s.from; toDate.value=s.to; renderRoomSelect(); showRoomHint(room); validate(); }
-    else alert('No continuous availability found for this room.');
-  });
-  bookBtn.addEventListener('click', book);
-
-  // Available tab
-  availRefreshBtn.addEventListener('click', renderAvailableList);
-  availBlock.addEventListener('change', renderAvailableList);
-  showNoAvail.addEventListener('change', renderAvailableList);
-
-  // Admin tab lock/unlock
-  
-  adminUnlockBtn.addEventListener('click', async ()=>{
-    const pin = (adminPinInput.value || '').trim() || '1234';
-    try{
-      let ok = false;
-      if(pin === '1234'){ ok = true; }
-      else{
-        try{
-          const cur = await getPin();
-          ok = (pin === cur);
-        }catch(_e){
-          // DB not reachable — allow default fallback
-          ok = (pin === '1234');
-        }
-      }
-      if(ok){
-        adminUnlocked = true;
-        setAdminUI();
-        alert('Admin unlocked');
-      }else{
-        alert('Incorrect PIN');
-      }
-    }catch(e){
-      // Last-resort fallback
-      if(pin === '1234'){
-        adminUnlocked = true;
-        setAdminUI();
-        alert('Admin unlocked (fallback)');
-      }else{
-        alert('Could not verify PIN. Try default 1234.');
-      }
-    }
-  });
-
-adminLockBtn.addEventListener('click', ()=>{ adminUnlocked = false; setAdminUI(); });
-  adminPinSetBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const pin = adminPinInput.value.trim();
-    if(!pin || pin.length < 4){ alert('PIN must be at least 4 chars.'); return; }
-    try{ await setPin(pin); alert('PIN updated.'); adminPinInput.value = ''; }
-    catch(err){ __dbg.log('PIN set error:', err.message||err); alert('Error setting PIN: '+err.message); }
-  });
-
-  // Manage Rooms
-  function renderManageRooms(){
-    const sel = renameRoomSelect;
-    if(!sel) return;
-    const prev = sel.value;
-    sel.innerHTML = '';
-    sortBy(rooms, r => `${r.block}-${r.name}`).forEach(r=>{
-      const o = document.createElement('option');
-      o.value = r.id;
-      o.textContent = `${r.block} — ${r.name}`;
-      sel.appendChild(o);
-    });
-    if(prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-  }
-  renameBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const roomId = renameRoomSelect.value;
-    const nb = newBlock.value.trim();
-    const nn = newName.value.trim();
-    if(!roomId || !nb || !nn){ alert('Fill all fields'); return; }
-    try{
-      const { error } = await supa.from('rooms').update({ block:nb, name:nn }).eq('id', roomId);
-      if(error) throw error;
-      const r = rooms.find(x=>x.id===roomId);
-      if(r){ r.block=nb; r.name=nn; }
-      newBlock.value=''; newName.value='';
-      renderRoomsList(); renderRoomSelect(); renderAvailableList();
-      alert('Room renamed.');
-    }catch(err){ __dbg.log('Rename error:', err.message||err); alert('Error renaming: '+err.message); }
-  });
-  deleteRoomBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const roomId = renameRoomSelect.value;
-    if(!roomId){ alert('Select a room'); return; }
-    try{
-      const { count, error: cntErr } = await supa
-        .from('bookings')
-        .select('id', { count: 'exact', head: true })
-        .eq('room_id', roomId);
-      if(cntErr) throw cntErr;
-      if((count||0) > 0){ alert('Cannot delete: room has existing bookings.'); return; }
-      if(!confirm('Delete this room permanently?')) return;
-      const { error: delErr } = await supa.from('rooms').delete().eq('id', roomId);
-      if(delErr) throw delErr;
-      rooms = rooms.filter(r=>r.id!==roomId);
-      renderRoomsList(); renderRoomSelect(); renderAvailableList();
-      alert('Room deleted.');
-    }catch(err){ __dbg.log('Delete error:', err.message||err); alert('Error deleting: '+err.message); }
-  });
-  sampleAddRangesBtn.addEventListener('click', ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const base = new Date();
-    const f1 = fmtISO(base);
-    const t1 = fmtISO(new Date(base.getTime()+3*86400000));
-    const f2 = fmtISO(new Date(base.getTime()+5*86400000));
-    const t2 = fmtISO(new Date(base.getTime()+8*86400000));
-    addRangesText.value = `${f1} to ${t1}\n${f2} to ${t2}`;
-  });
-  addRoomBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const block = addBlock.value.trim();
-    const name  = addName.value.trim();
-    const raw   = addRangesText.value;
-    if(!block || !name){ alert('Enter block and room name'); return; }
-    const lines = raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    const parsed = [];
-    for(const line of lines){ const r = parseRangeLine(line); if(r) parsed.push(r); }
-    const ranges = mergeRanges(parsed);
-    try{
-      const { data, error } = await supa
-        .from('rooms')
-        .insert({ block, name, ranges })
-        .select()
-        .single();
-      if(error) throw error;
-      rooms.push({ id: data.id, block: data.block, name: data.name, ranges: data.ranges || [] });
-      addBlock.value=''; addName.value=''; addRangesText.value='';
-      renderRoomsList(); renderRoomSelect(); renderAvailableList();
-      alert('Room added.');
-    }catch(err){
-      __dbg.log('Add room error:', err.message||err);
-      if(String(err.message||'').includes('duplicate key') || String(err.code||'')==='23505'){
-        alert('A room with the same Block + Name already exists.');
-      }else{
-        alert('Error adding room: '+err.message);
-      }
-    }
-  });
-
-  // Rooms availability editor
-  roomsList.addEventListener('change', renderRangesEditor);
-  saveRangesBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const id=roomsList.value; if(!id){ alert('Select a room.'); return; }
-    const lines = rangesText.value.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    const parsed=[]; for(const line of lines){ const r = parseRangeLine(line); if(r) parsed.push(r); }
-    try{
-      await dbUpsertRoomRanges(id, parsed);
-      renderRoomsList(); renderRoomSelect(); renderAvailableList();
-      alert('Availability ranges saved.');
-    }catch(err){ __dbg.log('Save ranges error:', err.message||err); alert('Error saving ranges: '+err.message); }
-  });
-  sampleRangesBtn.addEventListener('click', ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const id=roomsList.value; if(!id){ alert('Select a room first.'); return; }
-    const base=new Date();
-    const r1f=fmtISO(base), r1t=fmtISO(new Date(base.getTime()+3*86400000));
-    const r2f=fmtISO(new Date(base.getTime()+5*86400000)), r2t=fmtISO(new Date(base.getTime()+9*86400000));
-    rangesText.value = `${r1f} to ${r1t}\n${r2f} to ${r2t}`;
-  });
-
-  // Import
-  downloadTemplateBtn.addEventListener('click', ()=>{
-    const wb = XLSX.utils.book_new();
-    const data = [
-      ['booking_id','no_of_rooms','block','from','to'],
-      ['GRP-1001', 3, 'A', fmtISO(new Date()), fmtISO(new Date(Date.now()+2*86400000))],
-      ['GRP-1002', 2, 'B', fmtISO(new Date(Date.now()+3*86400000)), fmtISO(new Date(Date.now()+5*86400000))]
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, 'bookings');
-    XLSX.writeFile(wb, 'bookings_template.xlsx');
-  });
-  simulateImportBtn.addEventListener('click', ()=> simulateOrImport(false));
-  runImportBtn.addEventListener('click', ()=> simulateOrImport(true));
-
-  // Blackouts
-  blackoutBlock.addEventListener('change', renderBlackoutEditor);
-  saveBlackoutBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const blk=blackoutBlock.value; if(!blk) return;
-    const lines=blackoutText.value.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    const arr=[]; for(const line of lines){ const r=parseRangeLine(line); if(r) arr.push(r); }
-    try{
-      await dbSaveBlackouts(blk, arr);
-      renderRoomSelect(); renderAvailableList();
-      alert('Blackouts saved for block '+blk+'.');
-    }catch(err){ __dbg.log('Save blackouts error:', err.message||err); alert('Error saving blackouts: '+err.message); }
-  });
-  sampleBlackoutBtn.addEventListener('click', ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    const base=new Date();
-    const f=fmtISO(new Date(base.getTime()+4*86400000));
-    const t=fmtISO(new Date(base.getTime()+6*86400000));
-    blackoutText.value = `${f} to ${t}`;
-  });
-
-  exportCsvBtn.addEventListener('click', ()=>{
-    const head=['#','BookingRef','From','To','Nights','Block','Room','Guest','Phone'];
-    const lines=[head.join(',')];
-    sortBy(bookings,b=>`${b.from}-${b.block}-${b.room_name}`).forEach((b,i)=>{
-      lines.push([i+1,b.booking_ref||'',b.from,b.to,nights(b.from,b.to),b.block,b.room_name,`\"${b.guest_name||''}\"`,`\"${b.guest_phone||''}\"`].join(','));
-    });
-    const blob = new Blob([lines.join('\\n')],{type:'text/csv'});
-    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='bookings.csv'; a.click(); URL.revokeObjectURL(url);
-  });
-
-  resetBtn.addEventListener('click', async ()=>{
-    if(!adminUnlocked){ alert('Unlock admin first'); return; }
-    if(!confirm('This will delete ALL rooms, bookings, and blackouts in the database. Continue?')) return;
-    try{
-      await supa.from('bookings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await supa.from('blackouts').delete().neq('block', '___never___');
-      await supa.from('rooms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await dbLoadAll();
-      renderAll();
-      alert('All data cleared.');
-    }catch(err){ __dbg.log('Reset error:', err.message||err); alert('Error clearing: '+err.message); }
-  });
-
-  /********
-   * Init
-   ********/
-  function setSbBadge(ok, msg){
-    sbStatus.textContent = ok ? 'Supabase: OK' : ('Supabase: ' + (msg||'error'));
-    sbStatus.classList.toggle('badge-ok', ok);
-    sbStatus.classList.toggle('badge-err', !ok);
-    if(!ok) __dbg.log('Supabase status error:', msg||'Unknown');
-  }
-
-  async function renderAll(){
-    renderBlockFilter();
-    renderRoomsList();
-    renderRoomSelect();
-    renderBookings();
-    renderAvailableList();
-    validate();
-  }
-
-  (async function init(){
-    try{
-      __dbg.log('Init…');
-      const today=new Date(), tomorrow=new Date(today.getTime()+86400000);
-      if(!fromDate.value){ fromDate.value=fmtISO(today); toDate.value=fmtISO(tomorrow); }
-      // connectivity probe
-      const { data:probe, error:perr } = await supa.from('rooms').select('id').limit(1);
-      if(perr){ setSbBadge(false, perr.message); throw perr; }
-      setSbBadge(true);
-      await dbLoadAll();
-      await renderAll();
-      importResult.textContent = 'No file loaded.';
-    }catch(err){
-      setSbBadge(false, err.message||'startup');
-      __dbg.log('Startup failed:', err.message || err);
-      const wrap = document.querySelector('.wrap');
-      if(wrap){
-        const div = document.createElement('div');
-        div.style.cssText = 'margin:16px 0;padding:12px;border:1px solid #5a3; background:#132; color:#dfd; border-radius:8px';
-        div.textContent = 'Startup failed: ' + (err.message || err);
-        wrap.prepend(div);
-      }
-    }
-    setAdminUI();
-  })();
-  </script>
 </body>
 </html>
